@@ -1,51 +1,66 @@
 import { standardSchemaResolver } from "@hookform/resolvers/standard-schema";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { z } from "zod";
-import { AUTH_KEYS } from "@/features/auth/queries";
+import { resetAuthBoundQueries } from "@/features/auth/queries";
 import { usePreviousLocation } from "@/hooks/use-previous-location";
-import { authClient } from "@/lib/auth/auth.client";
+import { getAuthClient } from "@/lib/auth/auth-client";
 import {
-  getLoginAuthErrorMessage,
-  isEmailNotVerifiedError,
+  getRetryAfterMs,
+  getSignInCodeAuthErrorMessage,
+  isSignInCodeSpentError,
 } from "@/lib/auth/auth-errors";
-import type { Messages } from "@/lib/i18n";
 import { m } from "@/paraglide/messages";
+import {
+  getResendCooldownMs,
+  isSignInCode,
+  normalizeSignInCode,
+} from "../utils/sign-in-code";
 import { normalizeRedirectUrl } from "./normalize-redirect-url";
+import { useCooldown } from "./use-cooldown";
 
-const createLoginSchema = (messages: Messages) =>
+export type LoginStep = "email" | "code" | "name";
+
+const createEmailSchema = () =>
   z.object({
-    email: z.email(messages.login_validation_invalid_email()),
-    password: z.string().min(1, messages.login_validation_password_required()),
+    email: z.email(m.login_validation_invalid_email()),
   });
 
-type LoginSchema = z.infer<ReturnType<typeof createLoginSchema>>;
+const createCodeSchema = () =>
+  z.object({
+    code: z.string().refine(isSignInCode, m.login_validation_code()),
+  });
 
-export interface UseLoginFormOptions {
+type EmailSchema = z.infer<ReturnType<typeof createEmailSchema>>;
+type CodeSchema = z.infer<ReturnType<typeof createCodeSchema>>;
+
+interface UseLoginFormOptions {
   turnstileToken: string | null;
-  turnstilePending: boolean;
   resetTurnstile: () => void;
   redirectTo?: string;
 }
 
 export function useLoginForm(options: UseLoginFormOptions) {
-  const { turnstileToken, turnstilePending, resetTurnstile, redirectTo } =
-    options;
+  const { turnstileToken, resetTurnstile, redirectTo } = options;
 
-  const [loginStep, setLoginStep] = useState<"IDLE" | "VERIFYING" | "SUCCESS">(
-    "IDLE",
-  );
-
+  const [step, setStep] = useState<LoginStep>("email");
+  const [email, setEmail] = useState("");
+  const [signedIn, setSignedIn] = useState(false);
+  const [isResending, setIsResending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const cooldown = useCooldown();
   const navigate = useNavigate();
   const previousLocation = usePreviousLocation();
   const queryClient = useQueryClient();
-  const loginSchema = createLoginSchema(m);
 
-  const form = useForm<LoginSchema>({
-    resolver: standardSchemaResolver(loginSchema),
+  const emailForm = useForm<EmailSchema>({
+    resolver: standardSchemaResolver(createEmailSchema()),
+  });
+  const codeForm = useForm<CodeSchema>({
+    resolver: standardSchemaResolver(createCodeSchema()),
   });
 
   const performRedirect = (
@@ -61,115 +76,139 @@ export function useLoginForm(options: UseLoginFormOptions) {
 
     if (target.startsWith(window.location.origin)) {
       const url = new URL(target);
-      navigate({ to: `${url.pathname}${url.search}${url.hash}` });
+      void navigate({ to: `${url.pathname}${url.search}${url.hash}` });
       return;
     }
 
     window.location.assign(target);
   };
 
-  const emailValue = form.watch("email");
-  const latestResendStateRef = useRef({
-    emailValue: "",
-    turnstilePending,
-    turnstileToken,
-  });
-
-  latestResendStateRef.current = {
-    emailValue,
-    turnstilePending,
-    turnstileToken,
-  };
-
-  const onSubmit = async (data: LoginSchema) => {
-    setLoginStep("VERIFYING");
-
-    const { error } = await authClient.signIn.email({
-      email: data.email,
-      password: data.password,
-      fetchOptions: {
-        headers: { "X-Turnstile-Token": turnstileToken || "" },
-      },
-    });
-
-    resetTurnstile();
-
-    if (error) {
-      setLoginStep("IDLE");
-      const description =
-        getLoginAuthErrorMessage(error, m) ?? m.auth_error_default_desc();
-
-      toast.error(m.login_error_default(), {
-        description,
-        action: isEmailNotVerifiedError(error)
-          ? {
-              label: m.login_resend_verification(),
-              onClick: () => {
-                void handleResendVerification();
-              },
-            }
-          : undefined,
-      });
-      return;
-    }
-
-    queryClient.removeQueries({ queryKey: AUTH_KEYS.session });
-    setLoginStep("SUCCESS");
-
+  const finish = () => {
+    setSignedIn(true);
     setTimeout(() => {
       performRedirect(redirectTo, previousLocation);
       toast.success(m.login_toast_success());
     }, 800);
   };
 
-  const handleResendVerification = async () => {
-    const {
-      emailValue: currentEmailValue,
-      turnstilePending: isTurnstilePending,
-      turnstileToken: currentTurnstileToken,
-    } = latestResendStateRef.current;
+  /** Emails a code and moves to the code step; false when it was refused. */
+  const requestCode = async (address: string) => {
+    setError(null);
+    try {
+      const { error: sendError } =
+        await getAuthClient().emailOtp.sendVerificationOtp({
+          email: address,
+          type: "sign-in",
+          fetchOptions: {
+            headers: { "X-Turnstile-Token": turnstileToken || "" },
+          },
+        });
+      if (sendError) {
+        setError(
+          getSignInCodeAuthErrorMessage(sendError) ??
+            m.auth_error_default_desc(),
+        );
+        const retryAfterMs = getRetryAfterMs(sendError);
+        if (retryAfterMs && step === "code") {
+          cooldown.start(getResendCooldownMs(retryAfterMs));
+        }
+        return false;
+      }
+    } catch {
+      setError(m.auth_error_default_desc());
+      return false;
+    } finally {
+      resetTurnstile();
+    }
 
-    if (!currentEmailValue) return;
-    if (isTurnstilePending) {
-      toast.error(m.login_toast_wait_turnstile());
+    setEmail(address);
+    cooldown.start(getResendCooldownMs());
+    return true;
+  };
+
+  const onSubmitEmail = async (data: EmailSchema) => {
+    if (!(await requestCode(data.email))) return;
+    codeForm.reset();
+    setStep("code");
+  };
+
+  const onSubmitCode = async (data: CodeSchema) => {
+    setError(null);
+    try {
+      const { data: result, error: signInError } =
+        await getAuthClient().signIn.emailOtp({
+          email,
+          otp: normalizeSignInCode(data.code),
+        });
+      if (signInError) {
+        codeForm.reset();
+        if (isSignInCodeSpentError(signInError)) {
+          cooldown.clear();
+          setStep("email");
+        }
+        setError(
+          getSignInCodeAuthErrorMessage(signInError) ??
+            m.auth_error_default_desc(),
+        );
+        return;
+      }
+      // Signed in from here on, even before the name step finishes.
+      resetAuthBoundQueries(queryClient, "signed-in");
+      if (!result.user.name.trim()) {
+        setStep("name");
+        return;
+      }
+    } catch {
+      setError(m.auth_error_default_desc());
       return;
     }
 
-    const loadingToast = toast.loading(m.login_toast_sending_verification());
+    finish();
+  };
 
-    const { error } = await authClient.sendVerificationEmail({
-      email: currentEmailValue,
-      callbackURL: `${window.location.origin}/verify-email`,
-      fetchOptions: {
-        headers: { "X-Turnstile-Token": currentTurnstileToken || "" },
-      },
-    });
-
-    resetTurnstile();
-    toast.dismiss(loadingToast);
-
-    if (error) {
-      const description =
-        getLoginAuthErrorMessage(error, m) ?? m.auth_error_default_desc();
-      toast.error(m.login_toast_send_failed(), {
-        description,
-      });
-      return;
+  const resend = async () => {
+    if (isResending || cooldown.secondsLeft > 0) return;
+    setIsResending(true);
+    try {
+      if (await requestCode(email)) {
+        codeForm.reset();
+        toast.success(m.login_code_resent());
+      }
+    } finally {
+      setIsResending(false);
     }
+  };
 
-    toast.success(m.login_toast_verification_sent(), {
-      description: m.login_toast_check_inbox(),
-    });
+  const changeEmail = () => {
+    codeForm.reset();
+    cooldown.clear();
+    setError(null);
+    setStep("email");
   };
 
   return {
-    register: form.register,
-    errors: form.formState.errors,
-    handleSubmit: form.handleSubmit(onSubmit),
-    loginStep,
-    isSubmitting: form.formState.isSubmitting,
-    loginSchema,
+    step,
+    email,
+    error,
+    signedIn,
+    isResending,
+    resendSecondsLeft: cooldown.secondsLeft,
+    emailForm: {
+      register: emailForm.register,
+      errors: emailForm.formState.errors,
+    },
+    codeForm: {
+      register: codeForm.register,
+      errors: codeForm.formState.errors,
+    },
+    isSubmitting:
+      emailForm.formState.isSubmitting || codeForm.formState.isSubmitting,
+    handleSubmit:
+      step === "email"
+        ? emailForm.handleSubmit(onSubmitEmail)
+        : codeForm.handleSubmit(onSubmitCode),
+    resend,
+    changeEmail,
+    finish,
   };
 }
-
-export type UseLoginFormReturn = ReturnType<typeof useLoginForm>;

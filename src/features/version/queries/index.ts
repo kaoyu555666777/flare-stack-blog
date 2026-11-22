@@ -1,14 +1,13 @@
-import { queryOptions } from "@tanstack/react-query";
-import { checkUpdateFn } from "../api/version.api";
-import { VERSION_CACHE_KEYS } from "../version.schema";
+import { orpc } from "@/lib/orpc";
+import { ms } from "@/lib/duration";
 
-export const VERSION_KEYS = {
-  all: ["version"] as const,
-  updateCheck: VERSION_CACHE_KEYS.updateCheck,
-};
+export const updateCheckQuery = orpc.version.check.queryOptions({
+  staleTime: ms("6h"),
+  retry: false,
+});
 
-export const updateCheckQuery = queryOptions({
-  queryKey: VERSION_KEYS.updateCheck,
-  queryFn: () => checkUpdateFn(),
-  staleTime: 1000 * 60 * 10, // 10 minutes
+/** The notice after an upgrade. Reading it for the first time records the version. */
+export const upgradeNoticeQuery = orpc.version.upgradeNotice.queryOptions({
+  staleTime: ms("5m"),
+  retry: false,
 });

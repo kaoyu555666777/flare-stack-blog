@@ -1,0 +1,632 @@
+import { Link } from "@tanstack/react-router";
+import { useEffect, useRef } from "react";
+import { ArrowRight, ExternalLink, Link2, Plus, Trash2 } from "lucide-react";
+import { useFieldArray, useFormContext, useWatch } from "react-hook-form";
+import { AdminFormRow, AdminFormSection } from "@/components/admin/admin-page";
+import { Button, buttonClass } from "@/components/ui/button";
+import { DragHandle } from "@/components/ui/drag-handle";
+import { IconButton } from "@/components/ui/icon-button";
+import { Input, Textarea } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { OverlayUpload } from "@/features/config/components/admin/overlay-upload";
+import { previewSrc } from "@/features/config/components/admin/preview-src";
+import type { SystemConfig } from "@/features/config/config.schema";
+import {
+  SITE_DESCRIPTION_MAX,
+  TAGLINE_MAX,
+} from "@/features/config/site-config.schema";
+import {
+  canonicalizeNavHref,
+  isExternalNavHref,
+  NAV_LINK_CHILDREN_MAX,
+  NAV_LINKS_MAX,
+} from "@/features/config/utils/nav-links";
+import {
+  SOCIAL_PLATFORM_KEYS,
+  SOCIAL_PLATFORMS,
+} from "@/features/config/utils/social-platforms";
+import { cn } from "@/lib/utils";
+import { m } from "@/paraglide/messages";
+import { SettingRow } from "./setting-row";
+import { useNavSort } from "./use-nav-sort";
+import "./site-studio.css";
+
+export function SiteStudio() {
+  return (
+    <div className="site-studio">
+      <AdminFormSection title={m.settings_group_site_identity()}>
+        <TextFields />
+      </AdminFormSection>
+      <AdminFormSection title={m.settings_group_site_links()}>
+        <SocialLinksEditor />
+        <NavLinksEditor />
+      </AdminFormSection>
+      <p className="site-moved-hint">
+        {m.settings_site_moved_to_personalize()}
+        <Link
+          to="/admin/personalize"
+          className={buttonClass({ variant: "text", size: "sm" })}
+        >
+          {m.settings_site_moved_to_personalize_link()}
+          <ArrowRight size={16} aria-hidden="true" />
+        </Link>
+      </p>
+    </div>
+  );
+}
+
+/** The title, the author, the description and the tagline: a row each, with where it shows. */
+function TextFields() {
+  const { register, control, formState } = useFormContext<SystemConfig>();
+  const errors = formState.errors.site;
+  const description = useWatch({ control, name: "site.description" }) ?? "";
+  return (
+    <>
+      <SettingRow
+        label={m.settings_site_field_title()}
+        description={m.settings_site_title_hint()}
+        error={errors?.title?.message}
+      >
+        {(field) => (
+          <Input
+            {...register("site.title")}
+            {...field}
+            placeholder={m.settings_site_field_title_ph()}
+          />
+        )}
+      </SettingRow>
+      <SettingRow
+        label={m.settings_site_field_author()}
+        description={m.settings_site_author_hint()}
+        error={errors?.author?.message}
+      >
+        {(field) => (
+          <Input
+            {...register("site.author")}
+            {...field}
+            placeholder={m.settings_site_field_author_ph()}
+          />
+        )}
+      </SettingRow>
+      <SettingRow
+        label={m.settings_site_field_description()}
+        description={m.settings_site_description_hint()}
+        error={errors?.description?.message}
+      >
+        {(field) => (
+          <>
+            <Textarea
+              {...register("site.description")}
+              {...field}
+              rows={3}
+              placeholder={m.settings_site_field_description_ph()}
+            />
+            <p className="site-char-count">
+              {m.settings_site_char_count({
+                count: description.length,
+                max: SITE_DESCRIPTION_MAX,
+              })}
+            </p>
+          </>
+        )}
+      </SettingRow>
+      <SettingRow
+        label={m.settings_tagline()}
+        description={m.settings_site_tagline_hint()}
+        error={errors?.tagline?.message}
+      >
+        {(field) => (
+          <Input
+            {...register("site.tagline")}
+            {...field}
+            maxLength={TAGLINE_MAX}
+            placeholder={m.settings_tagline_ph()}
+          />
+        )}
+      </SettingRow>
+      <SearchPreview />
+    </>
+  );
+}
+
+/** The title and the description as a search engine lists them, live. */
+function SearchPreview() {
+  const { control } = useFormContext<SystemConfig>();
+  const title = useWatch({ control, name: "site.title" }) ?? "";
+  const description = useWatch({ control, name: "site.description" }) ?? "";
+  const icon =
+    previewSrc(useWatch({ control, name: "site.icons.favicon96" })) ??
+    previewSrc(useWatch({ control, name: "site.icons.faviconSvg" }));
+  const host = typeof window === "undefined" ? "" : window.location.host;
+  return (
+    <AdminFormRow
+      label={m.settings_site_search_preview()}
+      description={m.settings_site_search_preview_hint()}
+    >
+      <div className="site-search-preview" aria-hidden="true">
+        <div className="site-search-preview-site">
+          <span>{icon ? <img src={icon} alt="" /> : null}</span>
+          <p>
+            <b>{title}</b>
+            <i>{host}</i>
+          </p>
+        </div>
+        <p className="site-search-preview-title">{title}</p>
+        <p className="site-search-preview-text">{description}</p>
+      </div>
+    </AdminFormRow>
+  );
+}
+
+type NavSorting = ReturnType<typeof useNavSort>;
+type NavHrefName =
+  | `site.navLinks.${number}.href`
+  | `site.navLinks.${number}.children.${number}.href`;
+
+/** What a row of a sortable list hands its element: its ref, its drag state. */
+function sortableRow(sorting: NavSorting, id: string) {
+  return {
+    ref: (node: HTMLDivElement | null) => {
+      if (node) sorting.rows.current.set(id, node);
+      else sorting.rows.current.delete(id);
+    },
+    "data-dragging": sorting.drag?.id === id,
+    "data-drop-target": sorting.drag?.target === id && sorting.drag?.id !== id,
+    style:
+      sorting.drag?.id === id
+        ? { transform: `translateY(${sorting.drag.offset}px)` }
+        : undefined,
+  };
+}
+
+/** The address of a link or of a child link; it completes a bare host. */
+function NavHrefInput({
+  name,
+  label,
+  invalid,
+}: {
+  name: NavHrefName;
+  label: string;
+  invalid: boolean;
+}) {
+  const { register, setValue, watch } = useFormContext<SystemConfig>();
+  const canonicalHref = canonicalizeNavHref(watch(name) ?? "");
+  const external = isExternalNavHref(canonicalHref);
+  return (
+    <div className="relative min-w-0 flex-1">
+      <Input
+        {...register(name, {
+          onBlur: (event) => {
+            const next = canonicalizeNavHref(event.target.value);
+            if (next !== event.target.value) {
+              setValue(name, next, { shouldDirty: true, shouldValidate: true });
+            }
+          },
+        })}
+        aria-label={label}
+        aria-invalid={invalid || undefined}
+        placeholder={m.settings_site_nav_href_ph()}
+        className={cn(external && "pr-10")}
+      />
+      {external ? (
+        <ExternalLink
+          size={14}
+          className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 fuwari-text-30"
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function NavLinksEditor() {
+  const { control } = useFormContext<SystemConfig>();
+  const { fields, append, remove, move } = useFieldArray({
+    control,
+    name: "site.navLinks",
+  });
+  const sorting = useNavSort(
+    fields.map((field) => field.id),
+    move,
+  );
+
+  return (
+    <AdminFormRow
+      label={m.settings_site_nav_title()}
+      description={
+        <>
+          {m.settings_site_nav_hint()}
+          <span className="site-sort-hint">{m.settings_nav_drag_hint()}</span>
+        </>
+      }
+    >
+      <div className="site-nav-fields">
+        {fields.map((field, index) => (
+          <NavLinkRow
+            key={field.id}
+            id={field.id}
+            index={index}
+            sortable={fields.length > 1}
+            sorting={sorting}
+            onRemove={() => remove(index)}
+          />
+        ))}
+      </div>
+
+      {fields.length < NAV_LINKS_MAX ? (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => append({ label: "", href: "" })}
+          icon={<Plus size={15} />}
+          className="site-add-link"
+        >
+          {m.settings_site_nav_add()}
+        </Button>
+      ) : null}
+    </AdminFormRow>
+  );
+}
+
+/**
+ * One custom link. With child links it is a group: its address gives way to a
+ * note, and its children are listed under it, sorted among themselves only.
+ */
+function NavLinkRow({
+  id,
+  index,
+  sortable,
+  sorting,
+  onRemove,
+}: {
+  id: string;
+  index: number;
+  sortable: boolean;
+  sorting: NavSorting;
+  onRemove: () => void;
+}) {
+  const { control, register, setValue, watch, clearErrors, formState } =
+    useFormContext<SystemConfig>();
+  const children = useFieldArray({
+    control,
+    name: `site.navLinks.${index}.children`,
+  });
+  const childSorting = useNavSort(
+    children.fields.map((field) => field.id),
+    children.move,
+  );
+  const addChild = useRef<HTMLButtonElement>(null);
+  const refocus = useRef(0);
+  useEffect(() => () => cancelAnimationFrame(refocus.current), []);
+  const errors = formState.errors.site?.navLinks?.[index];
+  const label = watch(`site.navLinks.${index}.label`) ?? "";
+  const isGroup = children.fields.length > 0;
+  const full = children.fields.length >= NAV_LINK_CHILDREN_MAX;
+  const error = errors?.href?.message || errors?.label?.message;
+
+  return (
+    <div {...sortableRow(sorting, id)} className="site-nav-item space-y-1">
+      <div className="site-nav-row">
+        <DragHandle
+          {...sorting.handleProps(id)}
+          label={m.settings_nav_drag_label({
+            name: label || String(index + 1),
+          })}
+          title={m.settings_nav_drag_hint()}
+          disabled={!sortable}
+        />
+        <Input
+          {...register(`site.navLinks.${index}.label`)}
+          placeholder={m.settings_site_nav_label_ph()}
+          aria-label={m.settings_site_nav_name()}
+          aria-invalid={errors?.label ? true : undefined}
+        />
+        {isGroup ? (
+          <p className="site-nav-group-note">
+            {m.settings_site_nav_group_note()}
+          </p>
+        ) : (
+          <NavHrefInput
+            name={`site.navLinks.${index}.href`}
+            label={m.settings_site_nav_url()}
+            invalid={Boolean(errors?.href)}
+          />
+        )}
+        <IconButton
+          size="md"
+          tone="danger"
+          onClick={onRemove}
+          label={m.settings_site_nav_remove()}
+        >
+          <Trash2 size={16} />
+        </IconButton>
+      </div>
+      {error ? <p className="fuwari-form-field-error">{error}</p> : null}
+      <div
+        className="site-nav-children"
+        data-group={isGroup}
+        role={isGroup ? "group" : undefined}
+        aria-label={
+          isGroup
+            ? label
+              ? m.settings_site_nav_children_label({ name: label })
+              : m.settings_site_nav_children_label_unnamed({
+                  position: index + 1,
+                })
+            : undefined
+        }
+      >
+        {children.fields.map((child, childIndex) => (
+          <NavChildRow
+            key={child.id}
+            id={child.id}
+            index={index}
+            childIndex={childIndex}
+            sortable={children.fields.length > 1}
+            sorting={childSorting}
+            onRemove={() => {
+              children.remove(childIndex);
+              // The row under the pointer is gone; the add action stays.
+              cancelAnimationFrame(refocus.current);
+              refocus.current = requestAnimationFrame(() =>
+                addChild.current?.focus(),
+              );
+            }}
+          />
+        ))}
+        <div className="site-nav-add-child">
+          <Button
+            ref={addChild}
+            variant="outline"
+            size="sm"
+            disabled={full}
+            aria-describedby={full ? `${id}-child-limit` : undefined}
+            icon={<Plus size={15} />}
+            onClick={() => {
+              if (!isGroup) {
+                // A group leads nowhere: its address goes when it becomes one.
+                setValue(`site.navLinks.${index}.href`, "", {
+                  shouldDirty: true,
+                });
+                clearErrors(`site.navLinks.${index}.href`);
+              }
+              children.append({ label: "", href: "" });
+            }}
+          >
+            {m.settings_site_nav_child_add()}
+          </Button>
+          {full ? (
+            <span id={`${id}-child-limit`} className="site-nav-limit">
+              {m.settings_site_nav_child_limit({ max: NAV_LINK_CHILDREN_MAX })}
+            </span>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** One child link of a group: a handle, the name, the address and remove. */
+function NavChildRow({
+  id,
+  index,
+  childIndex,
+  sortable,
+  sorting,
+  onRemove,
+}: {
+  id: string;
+  index: number;
+  childIndex: number;
+  sortable: boolean;
+  sorting: NavSorting;
+  onRemove: () => void;
+}) {
+  const { register, watch, formState } = useFormContext<SystemConfig>();
+  const errors =
+    formState.errors.site?.navLinks?.[index]?.children?.[childIndex];
+  const label =
+    watch(`site.navLinks.${index}.children.${childIndex}.label`) ?? "";
+  const error = errors?.href?.message || errors?.label?.message;
+  return (
+    <div {...sortableRow(sorting, id)} className="site-nav-item space-y-1">
+      <div className="site-nav-row">
+        <DragHandle
+          {...sorting.handleProps(id)}
+          label={
+            label
+              ? m.settings_site_nav_child_drag_label({ name: label })
+              : m.settings_site_nav_child_drag_label_unnamed({
+                  position: childIndex + 1,
+                })
+          }
+          title={m.settings_nav_drag_hint()}
+          disabled={!sortable}
+        />
+        <Input
+          {...register(`site.navLinks.${index}.children.${childIndex}.label`)}
+          placeholder={m.settings_site_nav_label_ph()}
+          aria-label={m.settings_site_nav_child_name()}
+          aria-invalid={errors?.label ? true : undefined}
+        />
+        <NavHrefInput
+          name={`site.navLinks.${index}.children.${childIndex}.href`}
+          label={m.settings_site_nav_child_url()}
+          invalid={Boolean(errors?.href)}
+        />
+        <IconButton
+          size="md"
+          tone="danger"
+          onClick={onRemove}
+          label={m.settings_site_nav_child_remove()}
+        >
+          <Trash2 size={16} />
+        </IconButton>
+      </div>
+      {error ? <p className="fuwari-form-field-error">{error}</p> : null}
+    </div>
+  );
+}
+
+function SocialLinksEditor() {
+  const { control, register, watch, setValue, formState } =
+    useFormContext<SystemConfig>();
+  const { fields, append, remove, move } = useFieldArray({
+    control,
+    name: "site.social",
+  });
+  const sorting = useNavSort(
+    fields.map((field) => field.id),
+    move,
+  );
+  const social = useWatch({ control, name: "site.social" }) ?? [];
+  const taken = (key: string, except: number) =>
+    key !== "custom" &&
+    social.some((item, index) => index !== except && item.platform === key);
+  const unused = SOCIAL_PLATFORM_KEYS.filter(
+    (key) => key === "custom" || !social.some((item) => item.platform === key),
+  );
+  const error = formState.errors.site?.social;
+
+  return (
+    <AdminFormRow
+      label={m.settings_social_title()}
+      description={
+        <>
+          {m.settings_social_hint()}
+          <span className="site-sort-hint">{m.settings_nav_drag_hint()}</span>
+        </>
+      }
+    >
+      <div className="site-social-rows">
+        {fields.map((field, index) => {
+          const platform = watch(`site.social.${index}.platform`);
+          const urlPlaceholder =
+            platform === "email"
+              ? m.settings_social_email_ph()
+              : platform === "rss"
+                ? m.settings_social_rss_ph()
+                : m.settings_social_url_ph();
+          const rowError =
+            error?.[index]?.url?.message ?? error?.[index]?.label?.message;
+          const platformLabel =
+            !platform || platform === "custom"
+              ? watch(`site.social.${index}.label`) ||
+                m.settings_social_custom()
+              : SOCIAL_PLATFORMS[platform].label;
+          const PlatformIcon =
+            platform && platform !== "custom"
+              ? SOCIAL_PLATFORMS[platform].icon
+              : null;
+          const customIcon = previewSrc(watch(`site.social.${index}.icon`));
+          return (
+            <div
+              key={field.id}
+              ref={(node) => {
+                if (node) sorting.rows.current.set(field.id, node);
+                else sorting.rows.current.delete(field.id);
+              }}
+              className="site-social-item site-nav-item"
+              data-dragging={sorting.drag?.id === field.id}
+              data-drop-target={
+                sorting.drag?.target === field.id &&
+                sorting.drag?.id !== field.id
+              }
+              style={
+                sorting.drag?.id === field.id
+                  ? { transform: `translateY(${sorting.drag.offset}px)` }
+                  : undefined
+              }
+            >
+              <div className="site-social-row">
+                <DragHandle
+                  {...sorting.handleProps(field.id)}
+                  label={m.settings_nav_drag_label({ name: platformLabel })}
+                  title={m.settings_nav_drag_hint()}
+                  disabled={fields.length < 2}
+                />
+                <span className="site-social-icon" aria-hidden="true">
+                  {PlatformIcon ? (
+                    <PlatformIcon size={16} />
+                  ) : customIcon ? (
+                    <img src={customIcon} alt="" />
+                  ) : (
+                    <Link2 size={16} />
+                  )}
+                </span>
+                <Select
+                  value={platform ?? ""}
+                  aria-label={m.settings_social_platform_label()}
+                  onChange={(next) =>
+                    setValue(
+                      `site.social.${index}.platform`,
+                      next as (typeof SOCIAL_PLATFORM_KEYS)[number],
+                      { shouldDirty: true },
+                    )
+                  }
+                  options={SOCIAL_PLATFORM_KEYS.map((key) => ({
+                    value: key,
+                    label:
+                      key === "custom"
+                        ? m.settings_social_custom()
+                        : SOCIAL_PLATFORMS[key].label,
+                    disabled: taken(key, index),
+                  }))}
+                />
+                <Input
+                  {...register(`site.social.${index}.url`)}
+                  aria-label={m.settings_social_address_label()}
+                  placeholder={urlPlaceholder}
+                />
+                <IconButton
+                  size="md"
+                  tone="danger"
+                  onClick={() => remove(index)}
+                  label={m.settings_social_remove()}
+                >
+                  <Trash2 size={16} />
+                </IconButton>
+              </div>
+              {platform === "custom" ? (
+                <div className="site-social-row site-social-custom">
+                  <Input
+                    {...register(`site.social.${index}.label`)}
+                    aria-label={m.settings_social_label_label()}
+                    placeholder={m.settings_social_label_ph()}
+                  />
+                  <OverlayUpload
+                    name={`site.social.${index}.icon`}
+                    assetPath={`social/custom-${index}`}
+                    accept=".svg,.png,.webp"
+                    variant="regular"
+                    label={
+                      watch(`site.social.${index}.icon`)
+                        ? m.settings_replace()
+                        : m.settings_social_custom_icon_upload()
+                    }
+                  />
+                </div>
+              ) : null}
+              {rowError ? (
+                <p className="fuwari-form-field-error">{rowError}</p>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+      {unused.length > 0 ? (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            const next = unused[0];
+            if (next) append({ platform: next, url: "" });
+          }}
+          icon={<Plus size={15} />}
+          className="site-add-link"
+        >
+          {m.settings_social_add()}
+        </Button>
+      ) : null}
+    </AdminFormRow>
+  );
+}

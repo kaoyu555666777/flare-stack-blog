@@ -1,0 +1,1216 @@
+{
+  "posts": {
+    "list": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/posts"
+        }
+      }
+    },
+    "home": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/posts/home/page"
+        }
+      }
+    },
+    "bySlug": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/posts/{slug}"
+        }
+      }
+    },
+    "adjacent": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/posts/{slug}/adjacent"
+        }
+      }
+    },
+    "pinned": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/posts/pinned"
+        }
+      }
+    },
+    "popular": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/posts/popular"
+        }
+      }
+    },
+    "admin": {
+      "list": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "GET",
+            "path": "/admin/posts"
+          }
+        }
+      },
+      "get": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "GET",
+            "path": "/admin/posts/{id}"
+          }
+        }
+      },
+      "generateSlug": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "GET",
+            "path": "/admin/posts/slug"
+          }
+        }
+      },
+      "videoMeta": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "GET",
+            "path": "/admin/posts/video-meta"
+          }
+        }
+      },
+      "directVideo": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "GET",
+            "path": "/admin/posts/direct-video"
+          }
+        }
+      },
+      "create": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "POST",
+            "path": "/admin/posts"
+          }
+        }
+      },
+      "update": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "PATCH",
+            "path": "/admin/posts/{id}"
+          }
+        }
+      },
+      "remove": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "DELETE",
+            "path": "/admin/posts/{id}"
+          }
+        }
+      },
+      "publish": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "POST",
+            "path": "/admin/posts/{id}/publish"
+          }
+        }
+      },
+      "unpublish": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "POST",
+            "path": "/admin/posts/{id}/unpublish"
+          }
+        }
+      },
+      "discardChanges": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "POST",
+            "path": "/admin/posts/{id}/discard-changes"
+          }
+        }
+      },
+      "pin": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "POST",
+            "path": "/admin/posts/{id}/pin"
+          }
+        }
+      },
+      "unpin": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "POST",
+            "path": "/admin/posts/{id}/unpin"
+          }
+        }
+      },
+      "revisions": {
+        "list": {
+          "~orpc": {
+            "errorMap": {},
+            "meta": {},
+            "route": {
+              "method": "GET",
+              "path": "/admin/posts/{postId}/revisions"
+            }
+          }
+        },
+        "get": {
+          "~orpc": {
+            "errorMap": {},
+            "meta": {},
+            "route": {
+              "method": "GET",
+              "path": "/admin/posts/{postId}/revisions/{revisionId}"
+            }
+          }
+        },
+        "restore": {
+          "~orpc": {
+            "errorMap": {},
+            "meta": {},
+            "route": {
+              "method": "POST",
+              "path": "/admin/posts/{postId}/revisions/{revisionId}/restore"
+            }
+          }
+        },
+        "remove": {
+          "~orpc": {
+            "errorMap": {},
+            "meta": {},
+            "route": {
+              "method": "DELETE",
+              "path": "/admin/posts/{postId}/revisions"
+            }
+          }
+        }
+      }
+    }
+  },
+  "moments": {
+    "list": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/moments"
+        }
+      }
+    },
+    "latest": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/moments/latest"
+        }
+      }
+    },
+    "exists": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/moments/exists"
+        }
+      }
+    },
+    "byId": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/moments/{id}"
+        }
+      }
+    },
+    "admin": {
+      "get": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "GET",
+            "path": "/admin/moments/{id}"
+          }
+        }
+      },
+      "create": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "POST",
+            "path": "/admin/moments"
+          }
+        }
+      },
+      "update": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "PATCH",
+            "path": "/admin/moments/{id}"
+          }
+        }
+      },
+      "remove": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "DELETE",
+            "path": "/admin/moments/{id}"
+          }
+        }
+      }
+    }
+  },
+  "tags": {
+    "list": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/tags"
+        }
+      }
+    },
+    "admin": {
+      "list": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "GET",
+            "path": "/admin/tags"
+          }
+        }
+      },
+      "listWithCount": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "GET",
+            "path": "/admin/tags/with-count"
+          }
+        }
+      },
+      "create": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "POST",
+            "path": "/admin/tags"
+          }
+        }
+      },
+      "update": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "PATCH",
+            "path": "/admin/tags/{id}"
+          }
+        }
+      },
+      "remove": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "DELETE",
+            "path": "/admin/tags/{id}"
+          }
+        }
+      },
+      "setPostTags": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "PUT",
+            "path": "/admin/posts/{postId}/tags"
+          }
+        }
+      },
+      "byPostId": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "GET",
+            "path": "/admin/posts/{postId}/tags"
+          }
+        }
+      }
+    }
+  },
+  "categories": {
+    "list": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/categories"
+        }
+      }
+    },
+    "admin": {
+      "list": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "GET",
+            "path": "/admin/categories"
+          }
+        }
+      },
+      "options": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "GET",
+            "path": "/admin/categories/options"
+          }
+        }
+      },
+      "create": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "POST",
+            "path": "/admin/categories"
+          }
+        }
+      },
+      "update": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "PATCH",
+            "path": "/admin/categories/{id}"
+          }
+        }
+      },
+      "remove": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "DELETE",
+            "path": "/admin/categories/{id}"
+          }
+        }
+      }
+    }
+  },
+  "comments": {
+    "roots": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/posts/{postId}/comments"
+        }
+      }
+    },
+    "replies": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/posts/{postId}/comments/{rootId}/replies"
+        }
+      }
+    },
+    "thread": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/posts/{postId}/comments/{id}/thread"
+        }
+      }
+    },
+    "create": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/posts/{postId}/comments"
+        }
+      }
+    },
+    "moment": {
+      "roots": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "GET",
+            "path": "/moments/{momentId}/comments"
+          }
+        }
+      },
+      "replies": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "GET",
+            "path": "/moments/{momentId}/comments/{rootId}/replies"
+          }
+        }
+      },
+      "thread": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "GET",
+            "path": "/moments/{momentId}/comments/{id}/thread"
+          }
+        }
+      },
+      "create": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "POST",
+            "path": "/moments/{momentId}/comments"
+          }
+        }
+      }
+    },
+    "remove": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "DELETE",
+          "path": "/comments/{id}"
+        }
+      }
+    },
+    "mine": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/me/comments"
+        }
+      }
+    },
+    "admin": {
+      "list": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "GET",
+            "path": "/admin/comments"
+          }
+        }
+      },
+      "commentedPosts": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "GET",
+            "path": "/admin/comments/posts"
+          }
+        }
+      },
+      "markHandled": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "PUT",
+            "path": "/admin/comments/{id}/handled"
+          }
+        }
+      },
+      "unmarkHandled": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "DELETE",
+            "path": "/admin/comments/{id}/handled"
+          }
+        }
+      },
+      "markAllHandled": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "POST",
+            "path": "/admin/comments/handled"
+          }
+        }
+      }
+    }
+  },
+  "media": {
+    "list": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/admin/media"
+        }
+      }
+    },
+    "upload": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/admin/media"
+        }
+      }
+    },
+    "importFromUrl": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/admin/media/import"
+        }
+      }
+    },
+    "stats": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/admin/media/stats"
+        }
+      }
+    },
+    "totalSize": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/admin/media/size"
+        }
+      }
+    },
+    "linkedKeys": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/admin/media/linked-keys"
+        }
+      }
+    },
+    "removeUnused": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "DELETE",
+          "path": "/admin/media/unused"
+        }
+      }
+    },
+    "remove": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "DELETE",
+          "path": "/admin/media/{key}"
+        }
+      }
+    },
+    "linkedPosts": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/admin/media/{key}/posts"
+        }
+      }
+    },
+    "linkedMoments": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/admin/media/{key}/moments"
+        }
+      }
+    },
+    "replace": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/admin/media/{key}/replace"
+        }
+      }
+    },
+    "updateName": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "PATCH",
+          "path": "/admin/media/{key}"
+        }
+      }
+    }
+  },
+  "mutedUsers": {
+    "list": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/admin/muted-users"
+        }
+      }
+    },
+    "mute": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/admin/muted-users"
+        }
+      }
+    },
+    "unmute": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "DELETE",
+          "path": "/admin/muted-users/{userId}"
+        }
+      }
+    }
+  },
+  "config": {
+    "siteConfig": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/site/config"
+        }
+      }
+    },
+    "siteDomain": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/site/domain"
+        }
+      }
+    },
+    "admin": {
+      "get": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "GET",
+            "path": "/admin/config"
+          }
+        }
+      },
+      "update": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "PATCH",
+            "path": "/admin/config"
+          }
+        }
+      },
+      "uploadAsset": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "POST",
+            "path": "/admin/config/assets"
+          }
+        }
+      },
+      "uploadIcon": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "POST",
+            "path": "/admin/config/assets/icon"
+          }
+        }
+      }
+    }
+  },
+  "friendLinks": {
+    "listApproved": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/friend-links"
+        }
+      }
+    },
+    "submit": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/friend-links"
+        }
+      }
+    },
+    "mine": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/me/friend-links"
+        }
+      }
+    },
+    "admin": {
+      "list": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "GET",
+            "path": "/admin/friend-links"
+          }
+        }
+      },
+      "create": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "POST",
+            "path": "/admin/friend-links"
+          }
+        }
+      },
+      "update": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "PATCH",
+            "path": "/admin/friend-links/{id}"
+          }
+        }
+      },
+      "approve": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "POST",
+            "path": "/admin/friend-links/{id}/approve"
+          }
+        }
+      },
+      "reject": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "POST",
+            "path": "/admin/friend-links/{id}/reject"
+          }
+        }
+      },
+      "remove": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "DELETE",
+            "path": "/admin/friend-links/{id}"
+          }
+        }
+      }
+    }
+  },
+  "email": {
+    "configured": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/email/configured"
+        }
+      }
+    },
+    "testStatus": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/admin/email/test-status"
+        }
+      }
+    },
+    "unsubscribe": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/email/unsubscribe"
+        }
+      }
+    },
+    "replyStatus": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/me/notifications/reply"
+        }
+      }
+    },
+    "availability": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/me/notifications/availability"
+        }
+      }
+    },
+    "toggleReply": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "PATCH",
+          "path": "/me/notifications/reply"
+        }
+      }
+    },
+    "testConnection": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/admin/email/test"
+        }
+      }
+    }
+  },
+  "search": {
+    "search": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/search"
+        }
+      }
+    },
+    "version": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/search/version"
+        }
+      }
+    },
+    "rebuild": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/admin/search/rebuild"
+        }
+      }
+    }
+  },
+  "postPopularity": {
+    "status": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/admin/post-popularity"
+        }
+      }
+    },
+    "sync": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/admin/post-popularity/sync"
+        }
+      }
+    }
+  },
+  "dashboard": {
+    "overview": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/admin/dashboard"
+        }
+      }
+    },
+    "unrepliedComments": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/admin/dashboard/unreplied-comments"
+        }
+      }
+    }
+  },
+  "cache": {
+    "invalidate": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/admin/cache/invalidate"
+        }
+      }
+    }
+  },
+  "version": {
+    "check": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/admin/version"
+        }
+      }
+    },
+    "forceCheck": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/admin/version/check"
+        }
+      }
+    },
+    "dismissUpdate": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/admin/version/dismissed"
+        }
+      }
+    },
+    "upgradeNotice": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/admin/version/upgrade-notice"
+        }
+      }
+    },
+    "acknowledgeUpgrade": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/admin/version/upgrade-notice/acknowledge"
+        }
+      }
+    }
+  },
+  "webhooks": {
+    "test": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/admin/webhooks/test"
+        }
+      }
+    },
+    "telegramChats": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/admin/webhooks/telegram/chats"
+        }
+      }
+    }
+  },
+  "pairing": {
+    "exchange": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/pairing"
+        }
+      }
+    },
+    "admin": {
+      "generate": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "POST",
+            "path": "/admin/pairing-code"
+          }
+        }
+      },
+      "status": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "GET",
+            "path": "/admin/pairing-code"
+          }
+        }
+      },
+      "cancel": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "DELETE",
+            "path": "/admin/pairing-code"
+          }
+        }
+      }
+    }
+  }
+}

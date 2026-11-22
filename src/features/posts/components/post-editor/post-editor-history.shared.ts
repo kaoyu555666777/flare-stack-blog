@@ -1,76 +1,60 @@
-import { type LucideIcon, RotateCcw, Save, Send } from "lucide-react";
-import type {
-  deletePostRevisionsFn,
-  getPostRevisionFn,
-  listPostRevisionsFn,
-} from "@/features/posts/api/post-revisions.admin.api";
-import { ms } from "@/lib/duration";
+import { ORPCError } from "@orpc/client";
+import { orpcClient } from "@/lib/orpc";
 import { m } from "@/paraglide/messages";
+import { editConflictOf } from "./post-editor.model";
 
 export type RevisionListItem = Awaited<
-  ReturnType<typeof listPostRevisionsFn>
+  ReturnType<typeof orpcClient.posts.admin.revisions.list>
 >[number];
 
 export type RevisionDetail = NonNullable<
-  Awaited<ReturnType<typeof getPostRevisionFn>>
->;
-export type DeleteRevisionsResult = Awaited<
-  ReturnType<typeof deletePostRevisionsFn>
+  Awaited<ReturnType<typeof orpcClient.posts.admin.revisions.get>>
 >;
 
-export const HISTORY_POLL_WINDOW_MS = ms("20s");
-export const HISTORY_POLL_INTERVAL_MS = ms("3s");
-
-export function getRevisionReasonLabel(reason: RevisionListItem["reason"]) {
+export function getRevisionReasonLabel(
+  reason: RevisionListItem["reason"],
+  restoredFromRevisionId: number | null,
+) {
   switch (reason) {
     case "publish":
       return m.editor_history_reason_publish();
     case "restore_backup":
-      return m.editor_history_reason_restore_backup();
+      // A restore names the version it restored; discarding changes does not.
+      return restoredFromRevisionId == null
+        ? m.editor_history_reason_discard_backup()
+        : m.editor_history_reason_restore_backup();
     case "auto":
     default:
       return m.editor_history_reason_auto();
   }
 }
 
-export function getRevisionReasonVariant(reason: RevisionListItem["reason"]) {
-  switch (reason) {
-    case "publish":
-      return "default" as const;
-    case "restore_backup":
-      return "outline" as const;
-    case "auto":
-    default:
-      return "secondary" as const;
-  }
+export interface RevisionListEntry {
+  revision: RevisionListItem;
+  /** The title, only when it differs from the adjacent older entry's. */
+  title: string | null;
+  /** Characters gained or lost against the adjacent older entry; null for the oldest. */
+  lengthChange: number | null;
 }
 
-export function getRevisionReasonIcon(
-  reason: RevisionListItem["reason"],
-): LucideIcon {
-  switch (reason) {
-    case "publish":
-      return Send;
-    case "restore_backup":
-      return RotateCcw;
-    case "auto":
-    default:
-      return Save;
-  }
+/** `revisions` newest first, as the list returns them. */
+export function toRevisionListEntries(
+  revisions: ReadonlyArray<RevisionListItem>,
+): Array<RevisionListEntry> {
+  return revisions.map((revision, index) => {
+    const older = revisions[index + 1];
+    const title = revision.title.trim();
+    const changed = older == null || older.title.trim() !== title;
+    return {
+      revision,
+      title: changed ? title || m.common_untitled() : null,
+      lengthChange: older ? revision.contentLength - older.contentLength : null,
+    };
+  });
 }
 
-export function getRevisionReasonColorClass(
-  reason: RevisionListItem["reason"],
-) {
-  switch (reason) {
-    case "publish":
-      return "border-green-500/30 bg-green-500/10 text-green-700 hover:bg-green-500/20 dark:border-green-500/40 dark:bg-green-500/20 dark:text-green-400";
-    case "restore_backup":
-      return "border-amber-500/30 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 dark:border-amber-500/40 dark:bg-amber-500/20 dark:text-amber-400";
-    case "auto":
-    default:
-      return "border-blue-500/30 bg-blue-500/10 text-blue-700 hover:bg-blue-500/20 dark:border-blue-500/40 dark:bg-blue-500/20 dark:text-blue-400";
-  }
+export function formatLengthChange(change: number) {
+  return change > 0 ? `+${change}` : `${change}`;
 }
 
 export function getRestoreErrorMessage(reason: string) {
@@ -81,9 +65,38 @@ export function getRestoreErrorMessage(reason: string) {
       return m.editor_history_error_revision_not_found();
     case "POST_REVISION_INVALID_SNAPSHOT":
       return m.editor_history_error_invalid_snapshot();
+    case "SLUG_TAKEN":
+      return m.editor_history_error_slug_taken();
     default:
       return m.editor_action_unknown_error();
   }
+}
+
+/**
+ * Why a restore was refused. The page shows it until the Admin acts again, so
+ * a confirmation that closes over it cannot hide it.
+ */
+export interface RestoreFailure {
+  revisionId: number;
+  /** The post was saved again after the history was opened. */
+  editConflict: boolean;
+  message: string;
+}
+
+export function restoreFailureOf(
+  error: Error,
+  revisionId: number | null,
+): RestoreFailure {
+  const editConflict = editConflictOf(error) !== null;
+  return {
+    revisionId: revisionId ?? 0,
+    editConflict,
+    message: editConflict
+      ? m.editor_history_error_edit_conflict()
+      : getRestoreErrorMessage(
+          error instanceof ORPCError ? error.code : error.message,
+        ),
+  };
 }
 
 export function getDeleteErrorMessage(reason: string) {
@@ -91,4 +104,16 @@ export function getDeleteErrorMessage(reason: string) {
     default:
       return m.editor_action_unknown_error();
   }
+}
+
+export function toDateOrNull(value: unknown): Date | null {
+  if (value == null || value === "") return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  if (typeof value === "string" || typeof value === "number") {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  return null;
 }

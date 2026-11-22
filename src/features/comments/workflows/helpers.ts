@@ -1,8 +1,11 @@
-import type { JSONContent } from "@tiptap/core";
+import {
+  publicCommentUrl,
+  type CommentPage,
+} from "@/features/comments/comment-url";
 import * as CommentRepo from "@/features/comments/data/comments.data";
 import { generateUnsubscribeToken } from "@/features/email/email.utils";
+import type { CommentNotificationTarget } from "@/features/notification/notification.schema";
 import { publishNotificationEvent } from "@/features/notification/service/notification.publisher";
-import { convertToPlainText } from "@/features/posts/utils/content";
 import { serverEnv } from "@/lib/env/server.env";
 
 interface SendReplyNotificationParams {
@@ -11,11 +14,13 @@ interface SendReplyNotificationParams {
     rootId: number | null;
     replyToCommentId: number | null;
     userId: string | null;
-    content: JSONContent | null;
+    content: string | null;
   };
-  post: {
-    slug: string;
+  /** The Post or Moment replied on, as notifications name and link it. */
+  target: {
+    target: CommentNotificationTarget;
     title: string;
+    page: CommentPage;
   };
   skipNotifyUserId?: string;
 }
@@ -24,7 +29,7 @@ export async function sendReplyNotification(
   context: DbContext & { executionCtx: ExecutionContext },
   params: SendReplyNotificationParams,
 ): Promise<void> {
-  const { comment, post } = params;
+  const { comment, target } = params;
 
   if (!comment.replyToCommentId) return;
 
@@ -68,7 +73,7 @@ export async function sendReplyNotification(
     comment.id,
   );
   const replierName = replier?.name ?? "有人";
-  const replyPreview = convertToPlainText(comment.content).slice(0, 100);
+  const replyPreview = (comment.content ?? "").slice(0, 100);
 
   const { DOMAIN, BETTER_AUTH_SECRET } = serverEnv(context.env);
   const unsubscribeType = "reply_notification" as const;
@@ -79,9 +84,7 @@ export async function sendReplyNotification(
   );
   const unsubscribeUrl = `https://${DOMAIN}/unsubscribe?userId=${replyToAuthor.id}&type=${unsubscribeType}&token=${token}`;
 
-  // Build URL with comment anchor and query params for direct navigation
-  const rootId = comment.rootId ?? comment.id;
-  const commentUrl = `https://${DOMAIN}/post/${post.slug}?highlightCommentId=${comment.id}&rootId=${rootId}#comment-${comment.id}`;
+  const commentUrl = publicCommentUrl(DOMAIN, target.page, comment.id);
 
   try {
     await publishNotificationEvent(
@@ -92,14 +95,14 @@ export async function sendReplyNotification(
             ? "comment.reply_to_admin_published"
             : "comment.reply_to_user_published",
         data: {
-          to: replyToAuthor.email,
-          postTitle: post.title,
+          target: target.target,
+          postTitle: target.title,
           replierName,
           replyPreview: `${replyPreview}${replyPreview.length >= 100 ? "..." : ""}`,
           commentUrl,
-          unsubscribeUrl,
         },
       },
+      { to: replyToAuthor.email, unsubscribeUrl },
     );
 
     console.log(

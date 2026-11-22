@@ -2,16 +2,37 @@ import * as MediaRepo from "@/features/media/data/media.data";
 import * as Storage from "@/features/media/data/media.storage";
 import type {
   GetMediaListInput,
+  MediaInvalidDetail,
   UpdateMediaNameInput,
 } from "@/features/media/media.schema";
-import { getImageDimensions } from "@/features/media/utils/image-dimensions";
 import {
-  buildTransformOptions,
+  ACCEPTED_IMAGE_TYPES,
+  MAX_FILE_SIZE,
+} from "@/features/media/media.schema";
+import { momentHeading } from "@/features/moments/utils/moment-heading";
+import { getImageDimensions } from "@/features/media/utils/image-dimensions";
+import { matchesDeclaredImageType } from "@/features/media/utils/image-signature";
+import {
+  cleanMediaName,
   getContentTypeFromKey,
+  getOriginalImageUrl,
+  importedMediaName,
+  imageExtensionOf,
+  isSameImageType,
+  normalizeImageType,
+  parseImageTransform,
+  isGifKey,
 } from "@/features/media/utils/media.utils";
+import { purgeWorkersCache } from "@/features/cache/workers-cache";
+import { mediaPurgeTarget } from "@/features/cache/workers-cache-policy";
 import * as PostMediaRepo from "@/features/posts/data/post-media.data";
 import { CACHE_CONTROL } from "@/lib/constants";
+import { fetchPublicUrl } from "@/lib/http/public-fetch";
 import { err, ok } from "@/lib/errors";
+
+function mediaInvalid(detail: MediaInvalidDetail) {
+  return err({ reason: "MEDIA_INVALID" as const, detail });
+}
 
 export async function upload(
   context: DbContext & { executionCtx: ExecutionContext },
@@ -19,7 +40,11 @@ export async function upload(
 ) {
   const { file } = input;
 
-  const dimensions = getImageDimensions(await file.arrayBuffer());
+  const buffer = await file.arrayBuffer();
+  if (!matchesDeclaredImageType(buffer, file.type)) {
+    return mediaInvalid("TYPE_MISMATCH");
+  }
+  const dimensions = getImageDimensions(buffer);
   const width = dimensions?.width;
   const height = dimensions?.height;
 
@@ -29,7 +54,9 @@ export async function upload(
     const mediaRecord = await MediaRepo.insertMedia(context.db, {
       key: uploaded.key,
       url: uploaded.url,
-      fileName: uploaded.fileName,
+      fileName:
+        cleanMediaName(uploaded.fileName) ||
+        `image.${imageExtensionOf(uploaded.mimeType)}`,
       mimeType: uploaded.mimeType,
       sizeInBytes: uploaded.sizeInBytes,
       width,
@@ -62,17 +89,29 @@ export async function upload(
   }
 }
 
+/**
+ * Deletes one image. With `withRevisions`, an image only Post Revisions use is
+ * deleted together with those revisions; anything current that uses it still
+ * refuses the delete, and then no revision is deleted either.
+ */
 export async function deleteImage(
   context: DbContext & { executionCtx: ExecutionContext },
   key: string,
+  options: { withRevisions?: boolean } = {},
 ) {
-  // 后端兜底检查：防止删除正在被引用的媒体
-  const inUse = await PostMediaRepo.isMediaInUse(context.db, key);
-  if (inUse) {
-    return err({ reason: "MEDIA_IN_USE" });
+  // The in-use check is part of the delete, so a Post saved meanwhile with
+  // the image either makes it refuse or is refused itself.
+  const withRevisions = options.withRevisions
+    ? await MediaRepo.deleteMediaWithRevisions(context.db, key)
+    : undefined;
+  const deleted = options.withRevisions
+    ? withRevisions !== null
+    : await MediaRepo.deleteMediaIfUnused(context.db, key);
+  if (!deleted) {
+    return (await MediaRepo.findMediaByKey(context.db, key))
+      ? err({ reason: "MEDIA_IN_USE" })
+      : err({ reason: "MEDIA_NOT_FOUND" });
   }
-
-  await MediaRepo.deleteMedia(context.db, key);
   context.executionCtx.waitUntil(
     Storage.deleteFromR2(context.env, key).catch((deleteError) =>
       console.error(
@@ -88,7 +127,11 @@ export async function deleteImage(
     ),
   );
 
-  return ok({ success: true });
+  return ok(
+    withRevisions
+      ? { success: true, deletedRevisionCount: withRevisions.revisionCount }
+      : { success: true },
+  );
 }
 
 export async function getMediaList(
@@ -102,8 +145,23 @@ export async function isMediaInUse(context: DbContext, key: string) {
   return await PostMediaRepo.isMediaInUse(context.db, key);
 }
 
+export async function mediaExists(context: DbContext, key: string) {
+  return (await MediaRepo.findMediaByKey(context.db, key)) !== null;
+}
+
 export async function getLinkedPosts(context: DbContext, key: string) {
   return await PostMediaRepo.getPostsByMediaKey(context.db, key);
+}
+
+/** The Moments that show the image, titled as the Admin's other Moment lists title them. */
+export async function getLinkedMoments(context: DbContext, key: string) {
+  const moments = await MediaRepo.getMomentsByMediaKey(context.db, key);
+  // A Moment with images has no video, so a blank text is an image Moment.
+  return moments.map((moment) => ({
+    id: moment.id,
+    title: momentHeading({ text: moment.text, hasVideo: false }),
+    postedAt: moment.postedAt,
+  }));
 }
 
 export async function getLinkedMediaKeys(
@@ -117,11 +175,180 @@ export async function getTotalMediaSize(context: DbContext) {
   return await MediaRepo.getTotalMediaSize(context.db);
 }
 
+export async function getMediaStats(context: DbContext) {
+  return await MediaRepo.getMediaStats(context.db);
+}
+
 export async function updateMediaName(
   context: DbContext,
   data: UpdateMediaNameInput,
 ) {
-  return await MediaRepo.updateMediaName(context.db, data.key, data.name);
+  const renamed = await MediaRepo.updateMediaName(
+    context.db,
+    data.key,
+    data.name,
+  );
+  if (!renamed) {
+    return err({ reason: "MEDIA_NOT_FOUND" });
+  }
+  return ok(undefined);
+}
+
+/**
+ * Puts a new file at an existing key. Posts keep naming the key, so their
+ * drafts, Public Content Snapshots and Post Revisions are not written: the
+ * cached copies of the key are purged instead, and every address of it,
+ * public pages and editor alike, serves the new file from then on. The new
+ * file must be the same image type: the key's extension and the content type
+ * served at it would otherwise disagree.
+ */
+export async function replaceImage(
+  context: DbContext & { executionCtx: ExecutionContext },
+  input: { key: string; file: File },
+) {
+  const existing = await MediaRepo.findMediaByKey(context.db, input.key);
+  if (!existing) {
+    return err({ reason: "MEDIA_NOT_FOUND" });
+  }
+
+  const buffer = await input.file.arrayBuffer();
+  if (!matchesDeclaredImageType(buffer, input.file.type)) {
+    return mediaInvalid("TYPE_MISMATCH");
+  }
+  if (!isSameImageType(input.file.type, existing.mimeType)) {
+    return mediaInvalid("TYPE_CHANGED");
+  }
+  const dimensions = getImageDimensions(buffer);
+  await Storage.putToR2(context.env, input.file, input.key);
+  // Only the Media record's own address changes, so a page that already
+  // shows it (the media library) loads the new file instead of its copy.
+  const url = `${getOriginalImageUrl(input.key)}?v=${Date.now()}`;
+  const updated = await MediaRepo.updateMediaFile(context.db, input.key, {
+    url,
+    fileName: cleanMediaName(input.file.name) || existing.fileName,
+    mimeType: input.file.type || existing.mimeType,
+    sizeInBytes: input.file.size,
+    width: dimensions?.width,
+    height: dimensions?.height,
+  });
+  if (!updated) {
+    return err({ reason: "MEDIA_NOT_FOUND" });
+  }
+  await purgeWorkersCache(context.executionCtx, mediaPurgeTarget(input.key));
+  return ok(updated);
+}
+
+export async function deleteUnused(
+  context: DbContext & { executionCtx: ExecutionContext },
+) {
+  const keys = await MediaRepo.deleteUnusedMedia(context.db);
+  for (const key of keys) {
+    context.executionCtx.waitUntil(
+      Storage.deleteFromR2(context.env, key).catch((deleteError) =>
+        console.error(
+          JSON.stringify({
+            message: "r2 delete failed",
+            key,
+            error:
+              deleteError instanceof Error
+                ? deleteError.message
+                : String(deleteError),
+          }),
+        ),
+      ),
+    );
+  }
+  return ok({ count: keys.length });
+}
+
+export async function importFromUrl(
+  context: DbContext & { executionCtx: ExecutionContext },
+  input: { url: string; name?: string },
+) {
+  const parsed = parseImageUrl(input.url);
+  if (!parsed) {
+    return err({ reason: "MEDIA_INVALID_URL" });
+  }
+
+  // The address, the DNS answers of its name and every redirect must all
+  // be on the public internet.
+  const fetched = await fetchPublicUrl(parsed, {
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (fetched.error) {
+    return fetched.error.reason === "NOT_PUBLIC"
+      ? err({ reason: "MEDIA_INVALID_URL" })
+      : err({ reason: "MEDIA_IMPORT_FAILED" });
+  }
+  const response = fetched.data;
+
+  if (!response.ok) {
+    return err({ reason: "MEDIA_IMPORT_FAILED" });
+  }
+
+  const mime = (response.headers.get("content-type") || "")
+    .split(";")[0]
+    .trim()
+    .toLowerCase();
+  if (!ACCEPTED_IMAGE_TYPES.includes(mime)) {
+    return mediaInvalid("TYPE_UNRECOGNIZED");
+  }
+
+  const buffer = await response.arrayBuffer();
+  if (buffer.byteLength === 0) {
+    return mediaInvalid("EMPTY");
+  }
+  if (buffer.byteLength > MAX_FILE_SIZE) {
+    return mediaInvalid("TOO_LARGE");
+  }
+
+  const file = new File(
+    [buffer],
+    importedMediaName(input.name ?? lastPathPart(parsed), mime),
+    { type: mime },
+  );
+  return upload(context, { file });
+}
+
+function parseImageUrl(raw: string): URL | null {
+  try {
+    return new URL(raw.trim());
+  } catch {
+    return null;
+  }
+}
+
+/** The last part of the address path, decoded; empty when it has none or is not valid UTF-8 escapes. */
+function lastPathPart(url: URL) {
+  const last = url.pathname.split("/").filter(Boolean).pop() ?? "";
+  try {
+    return decodeURIComponent(last);
+  } catch {
+    return "";
+  }
+}
+
+// An SVG opened at its own address is a document on the site origin. Served
+// as a sandboxed document with no script source it cannot run script, and
+// nosniff keeps any image from being read as another type. As an <img>, an
+// SVG never runs script anyway, so this changes nothing on the site's pages.
+const IMAGE_SECURITY_HEADERS = {
+  "Content-Security-Policy":
+    "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox",
+  "X-Content-Type-Options": "nosniff",
+} as const;
+
+function withImageHeaders(
+  response: Response,
+  cacheControl: Record<string, string>,
+) {
+  for (const [name, value] of Object.entries({
+    ...cacheControl,
+    ...IMAGE_SECURITY_HEADERS,
+  })) {
+    response.headers.set(name, value);
+  }
+  return response;
 }
 
 export async function handleImageRequest(
@@ -135,85 +362,70 @@ export async function handleImageRequest(
   const serveOriginal = async () => {
     const object = await env.R2.get(key);
     if (!object) {
-      return new Response("Image not found", { status: 404 });
+      return withImageHeaders(
+        new Response("Image not found", { status: 404 }),
+        {},
+      );
     }
-
-    const contentType =
-      object.httpMetadata?.contentType ||
-      getContentTypeFromKey(key) ||
-      "application/octet-stream";
-
-    const headers = new Headers();
-    object.writeHttpMetadata(headers);
-    headers.set("Content-Type", contentType);
-    headers.set("ETag", object.httpEtag);
-
-    return new Response(object.body, { headers });
+    return originalResponse(object, storedContentType(object, key));
   };
 
-  // 1. 防止循环调用 & 显式请求原图
-  const viaHeader = request.headers.get("via");
-  const isLoop = viaHeader && /image-resizing/.test(viaHeader);
+  // 1. 显式请求原图
   const wantsOriginal = searchParams.get("original") === "true";
 
-  if (isLoop || wantsOriginal) {
-    return await serveOriginal();
-  }
+  const isLocalDev =
+    url.hostname === "localhost" || url.hostname === "127.0.0.1";
 
-  // 2. 构建 Cloudflare Image Resizing 参数
-  const transformOptions = buildTransformOptions(
+  // Local image transforms are slow (AVIF took ~30s for a ~1MB hero image)
+  // and unlike production's, so local dev serves the R2 original.
+  // 2. 解析变换参数（只接受允许的宽度，其余返回原图）
+  const transformOptions = parseImageTransform(
     searchParams,
     request.headers.get("Accept") || "",
   );
+  if (wantsOriginal || isLocalDev || isGifKey(key) || !transformOptions) {
+    return await serveOriginal();
+  }
 
-  // 3. 尝试进行图片处理
+  // 3. 读取 R2 原图，交给 Images 绑定缩放。Every read takes the stored
+  // file's current version, so a replaced file is transformed afresh; this
+  // runs only when the edge has no copy.
+  const object = await env.R2.get(key);
+  if (!object) {
+    return await serveOriginal();
+  }
+  const contentType = storedContentType(object, key);
+  const sourceFormat = transformSourceFormat(contentType);
+  if (!sourceFormat) {
+    return originalResponse(object, contentType);
+  }
+
   try {
-    const origin = url.origin;
-    const sourceImageUrl = `${origin}/images/${key}?original=true`;
-
-    const subRequestHeaders = new Headers();
-
-    const headersToKeep = ["user-agent", "accept"];
-    for (const [k, v] of request.headers.entries()) {
-      if (headersToKeep.includes(k.toLowerCase())) {
-        subRequestHeaders.set(k, v);
-      }
-    }
-
-    const imageRequest = new Request(sourceImageUrl, {
-      headers: subRequestHeaders,
-    });
-
-    // 调用 Cloudflare Images 变换
-    const response = await fetch(imageRequest, {
-      cf: { image: transformOptions },
-    });
-
-    // 如果变换失败 (如格式不支持)，降级回原图
-    if (!response.ok) {
-      console.error(
-        JSON.stringify({
-          message: "image transform failed",
-          key,
-          status: response.status,
-          statusText: response.statusText,
-        }),
-      );
-      return await serveOriginal();
-    }
+    const result = await env.IMAGES.input(object.body)
+      .transform({ width: transformOptions.width })
+      .output({
+        format: transformOptions.format
+          ? `image/${transformOptions.format}`
+          : sourceFormat,
+        quality: transformOptions.quality,
+      });
 
     // 4. 返回处理后的图片
-    // 使用 new Response(response.body, response) 保持状态码和其它优化头信息
-    const newResponse = new Response(response.body, response);
+    // 使用 new Response(body, response) 得到可写的头信息
+    const transformed = result.response();
+    const response = new Response(transformed.body, transformed);
 
-    // 覆盖/补充必要的缓存头
-    newResponse.headers.set("Vary", "Accept");
-    Object.entries(CACHE_CONTROL.immutable).forEach(([k, v]) => {
-      newResponse.headers.set(k, v);
-    });
-
-    return newResponse;
+    response.headers.set("Vary", "Accept");
+    // Browsers revalidate (the address outlives a replaced file); the tag
+    // lets a revalidation of an unchanged variant answer without a body.
+    response.headers.set(
+      "ETag",
+      `"${object.etag}-${transformOptions.width}-${transformOptions.format ?? "auto"}"`,
+    );
+    return withImageHeaders(response, CACHE_CONTROL.media);
   } catch (e) {
+    // 变换出错（如额度用尽、格式不支持）时降级回原图。The binding has
+    // consumed the R2 stream, so the original is read again.
     console.error(
       JSON.stringify({
         message: "image transform error",
@@ -223,4 +435,37 @@ export async function handleImageRequest(
     );
     return await serveOriginal();
   }
+}
+
+function storedContentType(object: R2Object, key: string) {
+  return (
+    object.httpMetadata?.contentType ||
+    getContentTypeFromKey(key) ||
+    "application/octet-stream"
+  );
+}
+
+function originalResponse(object: R2ObjectBody, contentType: string) {
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set("Content-Type", contentType);
+  headers.set("ETag", object.httpEtag);
+
+  return withImageHeaders(
+    new Response(object.body, { headers }),
+    CACHE_CONTROL.public,
+  );
+}
+
+// The stored types the Images binding resizes, each with the output type that
+// keeps its format when the browser accepts neither AVIF nor WebP. An SVG is
+// vector and a GIF may be animated, so both are served as stored.
+const TRANSFORM_SOURCE_FORMATS = new Map<string, ImageOutputOptions["format"]>([
+  ["image/jpeg", "image/jpeg"],
+  ["image/png", "image/png"],
+  ["image/webp", "image/webp"],
+]);
+
+function transformSourceFormat(contentType: string) {
+  return TRANSFORM_SOURCE_FORMATS.get(normalizeImageType(contentType));
 }

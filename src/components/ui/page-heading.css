@@ -1,0 +1,108 @@
+/*
+ * Section headings inside an Admin page, and public page headings. The
+ * Admin's page title is the page frame's (components/admin/admin-page.css);
+ * a section title takes the Admin's type scale (admin-variables.css) in
+ * every size, so sections read alike page to page.
+ */
+@layer components {
+  .fuwari-section-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 20px;
+    flex-shrink: 0;
+  }
+  .fuwari-section-heading[data-align="baseline"] {
+    align-items: first baseline;
+  }
+  .fuwari-heading-text {
+    min-width: 0;
+  }
+  .fuwari-section-heading :is(h2, h3) {
+    font-size: var(--admin-text-section, 22px);
+    font-weight: 600;
+    line-height: var(--admin-leading-section, 1.4);
+    color: inherit;
+    overflow-wrap: anywhere;
+  }
+  .fuwari-section-heading[data-size="md"] :is(h2, h3) {
+    font-size: var(--admin-text-section, 17px);
+  }
+  .fuwari-section-heading[data-size="sm"] :is(h2, h3) {
+    font-size: var(--admin-text-section, 16px);
+  }
+  .fuwari-heading-text > p {
+    margin-top: 4px;
+    font-size: var(--admin-text-meta, 13px);
+    line-height: var(--admin-leading-meta, 1.6);
+    color: var(--fuwari-fg-50);
+  }
+  .fuwari-heading-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+
+  .fuwari-public-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px 20px;
+    margin-bottom: 32px;
+  }
+  .fuwari-public-heading h1 {
+    position: relative;
+    font-family: var(--theme-heading-font);
+    letter-spacing: var(--theme-heading-tracking);
+    padding-left: 20px;
+    font-size: 28px;
+    font-weight: 700;
+  }
+  .fuwari-public-heading h1::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.3em;
+    width: 5px;
+    height: 1em;
+    border-radius: 4px;
+    background: var(--theme-accent);
+  }
+  /* Without the accent bar (Theme Recipe) the title and intro start at the edge. */
+  .fuwari-public-heading[data-accent="off"] > :is(h1, p) {
+    padding-left: 0;
+  }
+  .fuwari-public-heading[data-accent="off"] > h1::before {
+    content: none;
+  }
+  .fuwari-public-heading > a {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 44px;
+    font-size: 14px;
+    color: var(--theme-accent);
+  }
+  .fuwari-public-heading > p {
+    grid-column: 1 / -1;
+    padding-left: 20px;
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--fuwari-fg-50);
+  }
+  @media (max-width: 639px) {
+    .fuwari-public-heading {
+      gap: 8px;
+      margin-bottom: 24px;
+    }
+    .fuwari-public-heading h1 {
+      font-size: 24px;
+    }
+    .fuwari-public-heading > a {
+      font-size: 12px;
+    }
+    .fuwari-public-heading > p {
+      padding-left: 0;
+    }
+  }
+}

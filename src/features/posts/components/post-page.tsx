@@ -1,0 +1,191 @@
+import { ClientOnly, Link } from "@tanstack/react-router";
+import { Clock, FileText, Pencil } from "lucide-react";
+import { useRef } from "react";
+import { PUBLIC_IMAGE_WIDTH } from "@/features/media/utils/media.utils";
+import { CommentSection } from "@/features/comments/components/comment-section";
+import { ContentRenderer } from "@/features/posts/components/content/content-renderer";
+import type { PostWithToc } from "@/features/posts/schema/posts.schema";
+import { useThemeRecipe } from "@/features/theme/components/theme-recipe";
+import { useSession } from "@/features/auth/hooks/use-session";
+import { m } from "@/paraglide/messages";
+import { usePhotoSwipeGallery } from "./content/photo-swipe";
+import { useHeadingAnchors } from "./content/use-heading-anchors";
+import ZoomableImage from "./content/zoomable-image";
+import { PostAdjacentNav } from "./post-adjacent-nav";
+import { PostMeta } from "./post-meta";
+import { PostOutdatedNotice } from "./post-outdated-notice";
+import { PostShareButton } from "./post-share-button";
+import { PostSummary } from "./post-summary";
+import TableOfContents from "./table-of-contents";
+
+interface PostPageProps {
+  post: Exclude<PostWithToc, null>;
+  /** The post's canonical address, as the route's head has it. */
+  canonicalHref: string;
+}
+
+function enterDelay(extraMs: number) {
+  return `calc(var(--fuwari-content-delay) + ${extraMs}ms * var(--fuwari-stagger, 1))`;
+}
+
+export function PostPage({ post, canonicalHref }: PostPageProps) {
+  const { data: session } = useSession();
+  // The cover opens on its own; body images form one gallery.
+  const coverRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  usePhotoSwipeGallery(coverRef, post.id);
+  usePhotoSwipeGallery(contentRef, post.id);
+  useHeadingAnchors(contentRef);
+  // Approximate word count
+  const wordCount = post.readTimeInMinutes * 300;
+  const recipe = useThemeRecipe();
+  const inlineMeta = recipe.meta === "inline";
+
+  return (
+    <div className="relative flex flex-col rounded-(--theme-card-radius) py-1 md:py-0 md:bg-transparent gap-4 mb-4 w-full">
+      <TableOfContents headers={post.toc} />
+
+      {/* Main Post Container */}
+      <div className="fuwari-card-base fuwari-card-panel z-10 px-[var(--theme-panel-pad-x,1.5rem)] md:px-[var(--theme-panel-pad-x,2.25rem)] pt-6 pb-4 relative w-full">
+        {/* Word count and reading time */}
+        <div
+          className={
+            inlineMeta
+              ? "flex flex-row flex-wrap fuwari-text-30 gap-x-2 gap-y-1 mb-3 transition fuwari-onload-animation fuwari-meta-inline"
+              : "flex flex-row flex-wrap fuwari-text-30 gap-5 mb-3 transition fuwari-onload-animation"
+          }
+          style={{ animationDelay: enterDelay(0) }}
+        >
+          <div className="flex flex-row items-center">
+            {inlineMeta ? null : (
+              <div className="transition h-6 w-6 rounded-md bg-(--fuwari-ink-faint) fuwari-text-50 flex items-center justify-center mr-2">
+                <FileText strokeWidth={1.5} size={16} />
+              </div>
+            )}
+            <div className="text-sm">
+              {m.post_word_count({ count: wordCount })}
+            </div>
+          </div>
+          <div className="flex flex-row items-center">
+            {inlineMeta ? null : (
+              <div className="transition h-6 w-6 rounded-md bg-(--fuwari-ink-faint) fuwari-text-50 flex items-center justify-center mr-2">
+                <Clock strokeWidth={1.5} size={16} />
+              </div>
+            )}
+            <div className="text-sm">
+              {m.read_time({ count: post.readTimeInMinutes })}
+            </div>
+          </div>
+          <ClientOnly>
+            {session?.user.role === "admin" && (
+              <Link
+                to="/admin/posts/edit/$id"
+                params={{ id: String(post.id) }}
+                className="flex flex-row items-center fuwari-text-30 hover:fuwari-text-90 transition animate-in fade-in duration-500"
+              >
+                {inlineMeta ? null : (
+                  <div className="transition h-6 w-6 rounded-md bg-(--fuwari-ink-faint) fuwari-text-50 flex items-center justify-center mr-2">
+                    <Pencil strokeWidth={1.5} size={16} />
+                  </div>
+                )}
+                <div className="text-sm">{m.post_edit()}</div>
+              </Link>
+            )}
+          </ClientOnly>
+        </div>
+
+        {/* Title */}
+        <div
+          className="relative fuwari-onload-animation"
+          style={{ animationDelay: enterDelay(50) }}
+        >
+          <h1
+            className={
+              recipe.headingAccent === "on"
+                ? "fuwari-heading fuwari-page-title transition w-full block font-bold mb-3 fuwari-text-90 md:before:w-1 before:h-5 before:rounded-md before:bg-(--theme-accent) before:absolute before:top-3 before:-left-4.5"
+                : "fuwari-heading fuwari-page-title transition w-full block font-bold mb-3 fuwari-text-90"
+            }
+            style={{ viewTransitionName: `post-title-${post.slug}` }}
+          >
+            {post.title}
+          </h1>
+        </div>
+
+        {/* Metadata */}
+        <div
+          className="fuwari-onload-animation"
+          style={{
+            animationDelay: enterDelay(100),
+          }}
+        >
+          <PostMeta post={post} className="mb-5" />
+          {!post.cover && <div className="fuwari-meta-rule mb-5" />}
+        </div>
+
+        {post.cover && (
+          <div
+            ref={coverRef}
+            id="post-cover"
+            className="mb-8 rounded-(--theme-cover-radius) overflow-hidden fuwari-onload-animation"
+            style={{
+              animationDelay: enterDelay(175),
+            }}
+          >
+            <ZoomableImage
+              src={post.cover.url}
+              displayWidth={PUBLIC_IMAGE_WIDTH.cover}
+              alt={post.title}
+              width={post.cover.width ?? undefined}
+              height={post.cover.height ?? undefined}
+              className="w-full h-auto object-cover"
+              loading="eager"
+              fetchPriority="high"
+            />
+          </div>
+        )}
+
+        {/* Summary */}
+        <PostSummary summary={post.summary} />
+
+        {/* Markdown Content */}
+        <div
+          className="fuwari-onload-animation"
+          style={{
+            animationDelay: enterDelay(325),
+          }}
+        >
+          <PostOutdatedNotice
+            publishedAt={post.publishedAt}
+            updatedAt={post.updatedAt}
+          />
+          <div
+            ref={contentRef}
+            className="mb-6 prose dark:prose-invert prose-base max-w-none! fuwari-custom-md"
+          >
+            <ContentRenderer content={post.contentJson} />
+          </div>
+          <div className="my-8 flex items-center justify-center w-full">
+            <div className="h-px w-full bg-linear-to-r from-transparent via-(--theme-rule,var(--fuwari-meta-divider)) to-transparent opacity-20" />
+            <span className="mx-4 text-sm font-mono tracking-widest text-(--theme-rule,var(--fuwari-meta-divider)) opacity-50 whitespace-nowrap">
+              END
+            </span>
+            <div className="h-px w-full bg-linear-to-r from-(--theme-rule,var(--fuwari-meta-divider)) via-transparent to-transparent opacity-20" />
+          </div>
+          <div className="mb-4 flex justify-center">
+            <PostShareButton title={post.title} url={canonicalHref} />
+          </div>
+        </div>
+      </div>
+
+      <PostAdjacentNav slug={post.slug} />
+
+      {/* Comments Section */}
+      <div
+        className="fuwari-card-base fuwari-card-panel py-6 px-[var(--theme-panel-pad-x,1.5rem)] fuwari-onload-animation"
+        style={{ animationDelay: enterDelay(450) }}
+      >
+        <CommentSection target={{ type: "post", id: post.id }} />
+      </div>
+    </div>
+  );
+}

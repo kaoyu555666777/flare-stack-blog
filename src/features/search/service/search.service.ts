@@ -1,12 +1,7 @@
-import { insert, search as oramaSearch, remove } from "@orama/orama";
-import { and, eq, lte } from "drizzle-orm";
+import { inArray, isNotNull } from "drizzle-orm";
+import * as PublicAssignmentRepo from "@/features/posts/data/public-assignments.data";
 import { convertToPlainText } from "@/features/posts/utils/content";
-import { createMyDb } from "@/features/search/model/schema";
-import {
-  getOramaDb,
-  getOramaMeta,
-  persistOramaDb,
-} from "@/features/search/model/store";
+import * as SearchRepo from "@/features/search/data/search.data";
 import {
   CONTENT_SLICE,
   SNIPPET_SLICE,
@@ -17,146 +12,189 @@ import type {
   UpsertSearchDocInput,
 } from "@/features/search/search.schema";
 import {
-  buildSnippet,
-  getMatchedTerms,
-} from "@/features/search/utils/search.utils";
+  queryTerms,
+  toFtsMatchQuery,
+  tokenizeForSearch,
+} from "@/features/search/tokenize";
+import { buildSnippet } from "@/features/search/utils/search.utils";
 import { PostsTable } from "@/lib/db/schema";
 
-export async function search(context: DbContext, data: SearchQueryInput) {
-  const db = await getOramaDb(context.env);
-  const result = await oramaSearch(db, {
-    term: data.q,
-    limit: Math.min(data.limit, 25),
-  });
-
-  return result.hits.map((hit) => {
-    const { document, score } = hit;
-    const titleHighlight = buildSnippet({
-      text: document.title,
-      terms: getMatchedTerms(hit, "title"),
-      fallbackTerm: data.q,
-    });
-    const summaryHighlight = buildSnippet({
-      text: document.summary,
-      terms: getMatchedTerms(hit, "summary"),
-      fallbackTerm: data.q,
-    });
-    const contentHighlight = buildSnippet({
-      text: document.content,
-      terms: getMatchedTerms(hit, "content"),
-      fallbackTerm: data.q,
-    });
-
-    return {
-      post: {
-        id: document.id,
-        slug: document.slug,
-        title: document.title,
-        summary: document.summary,
-        tags: document.tags,
-      },
-      score,
-      matches: {
-        title: titleHighlight,
-        summary: summaryHighlight,
-        contentSnippet: contentHighlight,
-      },
-    };
-  });
-}
-
-export async function upsert(
-  context: { env: Env },
+function toIndexedDocument(
   data: UpsertSearchDocInput,
-) {
-  const db = await getOramaDb(context.env);
-
-  try {
-    await remove(db, data.id.toString());
-  } catch {}
-
+): Parameters<typeof SearchRepo.upsertSearchDocument>[1] {
   const plain = convertToPlainText(data.contentJson ?? null);
+  const indexed = [data.category?.trim(), plain].filter(Boolean).join("\n");
   const content =
-    plain.length > CONTENT_SLICE ? plain.slice(0, CONTENT_SLICE) : plain;
+    indexed.length > CONTENT_SLICE ? indexed.slice(0, CONTENT_SLICE) : indexed;
   const summary =
     data.summary && data.summary.trim().length > 0
       ? data.summary
       : content.slice(0, SNIPPET_SLICE);
 
-  await insert(db, {
-    id: data.id.toString(),
+  return {
+    postId: data.id,
     slug: data.slug,
     title: data.title,
     summary,
     content,
     tags: data.tags ?? [],
-  });
+    tokens: tokenizeForSearch(
+      data.title,
+      summary,
+      content,
+      data.category,
+      ...(data.tags ?? []),
+    ),
+  };
+}
 
-  await persistOramaDb(context.env, db);
+export async function search(context: DbContext, data: SearchQueryInput) {
+  const match = toFtsMatchQuery(data.q);
+  if (!match) return [];
+
+  const rows = await SearchRepo.matchSearchDocuments(
+    context.env,
+    match,
+    Math.min(data.limit, 25),
+  );
+  const terms = queryTerms(data.q);
+
+  return rows.map((row) => ({
+    post: {
+      id: row.postId,
+      slug: row.slug,
+      title: row.title,
+      summary: row.summary,
+      tags: row.tags,
+    },
+    score: 0,
+    matches: {
+      title: buildSnippet({
+        text: row.title,
+        terms,
+        fallbackTerm: data.q,
+      }),
+      summary: buildSnippet({
+        text: row.summary,
+        terms,
+        fallbackTerm: data.q,
+      }),
+      contentSnippet: buildSnippet({
+        text: row.content,
+        terms,
+        fallbackTerm: data.q,
+      }),
+    },
+  }));
+}
+
+export async function upsert(
+  context: { env: Env; db: DB },
+  data: UpsertSearchDocInput,
+) {
+  await SearchRepo.upsertSearchDocument(context.db, toIndexedDocument(data));
   return { id: data.id };
 }
 
 export async function deleteIndex(
-  context: { env: Env },
+  context: { env: Env; db: DB },
   data: DeleteSearchDocInput,
 ) {
-  const db = await getOramaDb(context.env);
-  await remove(db, data.id.toString());
-  await persistOramaDb(context.env, db);
+  await SearchRepo.deleteSearchDocument(context.db, data.id);
   return { id: data.id };
 }
 
-export async function rebuildIndex(context: DbContext) {
-  const { env, db } = context;
-  const start = Date.now();
-  console.log("[search] Start backfilling index...");
+// Posts read per query, so the ids bound to one statement stay far below D1's
+// limit of 100 bound values.
+const REINDEX_CHUNK = 50;
 
-  const searchDb = await createMyDb();
+/**
+ * The documents of the given Published Posts, or of every one when no ids are
+ * given. Title, summary and content come from the Public Content Snapshot, the
+ * Category and Tags from the public assignments (ADR 0033). A Post with
+ * nothing to index is left out.
+ */
+async function buildDocuments(db: DB, postIds?: Array<number>) {
+  const [posts, assignments] = await Promise.all([
+    db
+      .select({
+        id: PostsTable.id,
+        publicSnapshotJson: PostsTable.publicSnapshotJson,
+      })
+      .from(PostsTable)
+      .where(
+        postIds
+          ? inArray(PostsTable.id, postIds)
+          : isNotNull(PostsTable.publicSnapshotJson),
+      ),
+    PublicAssignmentRepo.findPublicAssignments(db, postIds),
+  ]);
 
-  const posts = await db.query.PostsTable.findMany({
-    where: and(
-      eq(PostsTable.status, "published"),
-      lte(PostsTable.publishedAt, new Date()),
-    ),
-    with: {
-      postTags: {
-        with: {
-          tag: true,
-        },
-      },
-    },
-  });
-
+  const documents = [];
   for (const post of posts) {
-    if (!post.title || !post.slug) continue;
-    const plain = convertToPlainText(post.contentJson);
-    const content =
-      plain.length > CONTENT_SLICE ? plain.slice(0, CONTENT_SLICE) : plain;
-    const summary =
-      post.summary && post.summary.trim().length > 0
-        ? post.summary
-        : content.slice(0, SNIPPET_SLICE);
+    const snapshot = post.publicSnapshotJson;
+    if (!snapshot?.title || !snapshot.slug) continue;
+    const assignment = assignments.get(post.id);
+    const tags = assignment?.tags.map((tag) => tag.name) ?? [];
+    const categoryName = assignment?.category?.name ?? null;
 
-    const tags = post.postTags.map((pt) => pt.tag.name);
-
-    await insert(searchDb, {
-      id: post.id.toString(),
-      title: post.title,
-      slug: post.slug,
-      tags,
-      summary,
-      content,
-    });
+    documents.push(
+      toIndexedDocument({
+        id: post.id,
+        slug: snapshot.slug,
+        title: snapshot.title,
+        summary: snapshot.summary,
+        contentJson: snapshot.contentJson,
+        tags,
+        category: categoryName,
+      }),
+    );
   }
+  return documents;
+}
 
-  await persistOramaDb(env, searchDb);
+export async function rebuildIndex(context: DbContext) {
+  const { db } = context;
+  const start = Date.now();
+
+  const documents = await buildDocuments(db);
+  await SearchRepo.replaceSearchDocuments(db, documents);
 
   const duration = Date.now() - start;
-  console.log(`[search] Indexed ${posts.length} posts in ${duration}ms`);
+  console.log(`[search] Indexed ${documents.length} posts in ${duration}ms`);
 
-  return { indexed: posts.length, duration };
+  return { indexed: documents.length, duration };
+}
+
+/**
+ * Brings the documents of the given Posts up to date with what the public site
+ * shows now. A Category or Tag that is renamed or deleted changes the public
+ * label of the Published Posts in its Public Usage without republishing them,
+ * so the search index follows here. A Post that is not published, or has
+ * nothing to index, leaves the index. The cost is bounded by the number of
+ * Posts and the indexed content length per Post, and the writes are batched.
+ */
+export async function reindexPosts(
+  context: { env: Env; db: DB },
+  postIds: Array<number>,
+) {
+  const ids = [...new Set(postIds)];
+  const documents = [];
+  const removedPostIds = [];
+  for (let i = 0; i < ids.length; i += REINDEX_CHUNK) {
+    const chunk = ids.slice(i, i + REINDEX_CHUNK);
+    const built = await buildDocuments(context.db, chunk);
+    const indexed = new Set(built.map((document) => document.postId));
+    documents.push(...built);
+    removedPostIds.push(...chunk.filter((id) => !indexed.has(id)));
+  }
+  await SearchRepo.applySearchDocuments(context.db, {
+    documents,
+    removedPostIds,
+  });
+  return { reindexed: documents.length };
 }
 
 export async function getIndexVersion(context: DbContext) {
-  return await getOramaMeta(context.env);
+  return { version: await SearchRepo.readSearchIndexVersion(context.db) };
 }

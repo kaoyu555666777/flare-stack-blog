@@ -1,0 +1,28 @@
+.taxonomy-name-dialog .fuwari-modal-content {
+  padding: 24px;
+}
+.taxonomy-name-dialog header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.taxonomy-name-dialog h2 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--fuwari-fg-75);
+}
+.taxonomy-name-dialog form {
+  margin-top: 20px;
+}
+.taxonomy-name-dialog footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
+}
+.taxonomy-name-dialog form [role="alert"] {
+  margin-top: 8px;
+}

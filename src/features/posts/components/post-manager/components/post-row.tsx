@@ -1,155 +1,284 @@
-import { ClientOnly, useNavigate } from "@tanstack/react-router";
-import { Edit3, MoreVertical, Trash2 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import Dropdown from "@/components/ui/dropdown";
-import { formatDate } from "@/lib/utils";
+import { Link } from "@tanstack/react-router";
+import { ArrowUpRight, EyeOff, Pin, PinOff, Trash2 } from "lucide-react";
+import { ActionMenu, type ActionMenuItem } from "@/components/ui/action-menu";
+import { IconButton, iconButtonClass } from "@/components/ui/icon-button";
+import { ListCardColumns, SortHeader } from "@/components/ui/list-card";
+import { openPublicPost } from "@/features/posts/utils/open-public-post";
+import {
+  postStateOf,
+  postStateLabel,
+} from "@/features/posts/components/post-state";
+import { formatCount, formatDate, formatTimeAgo } from "@/lib/utils";
 import { m } from "@/paraglide/messages";
-import type { PostListItem } from "../types";
+import type { AdminPostListItem, PostPopularity, SortField } from "../types";
 
-interface PostRowProps {
-  post: PostListItem;
-  onDelete: (post: PostListItem) => void;
+/** The Tags a row names after its Category; the rest are counted. */
+const TAGS_SHOWN = 3;
+
+const order = (i: number) => ({ "--i": i }) as object;
+
+/** Why a Post has no view count, in words. */
+function noViewsHint(post: AdminPostListItem, popularity?: PostPopularity) {
+  if (post.status !== "published" || !post.publicSlug)
+    return m.admin_posts_views_draft();
+  switch (popularity) {
+    case "unconfigured":
+      return m.admin_posts_views_unconfigured();
+    case "expired":
+      return m.admin_posts_views_expired();
+    default:
+      return m.admin_posts_views_missing();
+  }
 }
 
-export function PostRow({ post, onDelete }: PostRowProps) {
-  const navigate = useNavigate();
-
-  const handleEdit = () => {
-    navigate({
-      to: "/admin/posts/edit/$id",
-      params: { id: String(post.id) },
-    });
-  };
-
+function Sort({
+  field,
+  sortBy,
+  onSort,
+  children,
+}: {
+  field: SortField;
+  sortBy: SortField;
+  onSort: (sortBy: SortField) => void;
+  children: string;
+}) {
   return (
-    <div className="group px-4 py-4 flex flex-col md:grid md:grid-cols-12 gap-4 items-center hover:bg-muted/30 transition-all duration-200 relative border-b border-border/30 last:border-0">
-      {/* Main Content: Info Block */}
-      <div
-        className="md:col-span-6 min-w-0 cursor-pointer group/title w-full flex flex-col gap-1"
-        onClick={handleEdit}
-      >
-        {/* Metadata Header: ID */}
-        <div className="flex items-center gap-3">
-          <span className="font-mono text-muted-foreground text-[10px] tracking-widest">
-            #{post.id.toString().padStart(3, "0")}
-          </span>
-        </div>
-
-        {/* Title */}
-        <h3 className="font-serif font-medium text-lg text-foreground tracking-tight group-hover/title:underline underline-offset-4 decoration-border/50 transition-all truncate">
-          {post.title}
-        </h3>
-
-        {/* Summary */}
-        <p className="text-xs text-muted-foreground truncate max-w-3xl font-mono opacity-70">
-          {post.summary || m.admin_posts_no_summary()}
-        </p>
-      </div>
-
-      {/* Middle side: Status */}
-      <div className="md:col-span-3 flex items-center gap-4">
-        <StatusBadge status={post.status} />
-      </div>
-
-      {/* Right Side: Date & Actions (Desktop Split) */}
-      <div className="w-full flex items-center gap-6 mt-2 md:mt-0 md:contents">
-        {/* Smart Date Display */}
-        <div className="md:col-span-2 flex flex-col items-start gap-1 md:justify-self-start">
-          <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
-            <span className="opacity-50">
-              {post.status === "published"
-                ? m.admin_posts_time_published()
-                : m.admin_posts_time_modified()}
-            </span>
-            <ClientOnly fallback={<span>-</span>}>
-              {post.status === "published"
-                ? formatDate(post.publishedAt || post.createdAt)
-                : formatDate(post.updatedAt)}
-            </ClientOnly>
-          </div>
-        </div>
-
-        {/* Actions (Desktop Only) */}
-        <div className="hidden md:flex md:col-span-1 items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200 justify-end">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleEdit();
-            }}
-            className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-transparent rounded-none"
-            title={m.admin_posts_action_edit()}
-          >
-            <Edit3 size={14} strokeWidth={1.5} />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-transparent rounded-none"
-            title={m.admin_posts_action_delete()}
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete(post);
-            }}
-          >
-            <Trash2 size={14} strokeWidth={1.5} />
-          </Button>
-        </div>
-
-        {/* Mobile Dropdown (Hidden on Desktop) */}
-        <div className="md:hidden ml-auto">
-          <Dropdown
-            trigger={
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-muted-foreground rounded-none"
-              >
-                <MoreVertical size={16} />
-              </Button>
-            }
-            items={[
-              {
-                label: m.admin_posts_action_edit_post(),
-                icon: <Edit3 size={14} strokeWidth={1.5} />,
-                onClick: handleEdit,
-              },
-              {
-                label: m.admin_posts_action_delete_post(),
-                icon: <Trash2 size={14} strokeWidth={1.5} />,
-                onClick: () => onDelete(post),
-                danger: true,
-              },
-            ]}
-          />
-        </div>
-      </div>
-    </div>
+    <SortHeader
+      active={sortBy === field}
+      label={m.admin_posts_sort_by_column({ column: children })}
+      onSort={() => onSort(field)}
+    >
+      {children}
+    </SortHeader>
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
+/**
+ * The names of the columns, in the grid the rows share. The sortable ones
+ * are buttons: 浏览 only while views can be read, the time by what the list
+ * shows (最近修改 or 发布时间).
+ */
+export function PostListColumns({
+  sortBy,
+  viewsSortable,
+  onSortByChange,
+}: {
+  sortBy: SortField;
+  viewsSortable: boolean;
+  onSortByChange: (sortBy: SortField) => void;
+}) {
+  const published = sortBy === "publishedAt";
   return (
-    <Badge
-      variant="outline"
-      className={
-        "text-[9px] px-2 py-0.5 uppercase tracking-widest font-mono font-normal rounded-none border border-border/50 shadow-none bg-transparent " +
-        (status === "published"
-          ? "text-emerald-600 border-emerald-500/30"
-          : status === "draft"
-            ? "text-muted-foreground border-border"
-            : "text-amber-600 border-amber-500/30")
-      }
+    <ListCardColumns className="post-cols">
+      <span role="columnheader">{m.admin_posts_col_title()}</span>
+      <span role="columnheader">{m.admin_posts_col_status()}</span>
+      <span role="columnheader" className="post-num">
+        {viewsSortable ? (
+          <Sort field="viewCount" sortBy={sortBy} onSort={onSortByChange}>
+            {m.admin_posts_col_views()}
+          </Sort>
+        ) : (
+          m.admin_posts_col_views()
+        )}
+      </span>
+      <span role="columnheader" className="post-num">
+        <Sort field="commentCount" sortBy={sortBy} onSort={onSortByChange}>
+          {m.admin_posts_col_comments()}
+        </Sort>
+      </span>
+      <span role="columnheader">
+        <Sort
+          field={published ? "publishedAt" : "updatedAt"}
+          sortBy={sortBy}
+          onSort={onSortByChange}
+        >
+          {published
+            ? m.admin_posts_col_published_at()
+            : m.admin_posts_sort_recent_upd()}
+        </Sort>
+      </span>
+      <span role="columnheader" aria-label={m.admin_posts_col_actions()} />
+    </ListCardColumns>
+  );
+}
+
+/**
+ * One Post in two lines: the title (the row's link, to the editor) over its
+ * Category and Tags; then its state, views, Comments and time. The actions
+ * show under the pointer or focus; narrower than a table, state and time
+ * join the second line.
+ */
+export function PostRow({
+  post,
+  index,
+  sortBy,
+  popularity,
+  pinPending,
+  onTogglePin,
+  onDelete,
+  onUnpublish,
+}: {
+  post: AdminPostListItem;
+  /** The row's place, for the rise-in. */
+  index: number;
+  sortBy: SortField;
+  /** Why views may be missing; with `ready`, a published Post always has them. */
+  popularity?: PostPopularity;
+  pinPending: boolean;
+  onTogglePin: () => void;
+  onDelete: (trigger: HTMLButtonElement) => void;
+  onUnpublish: (trigger: HTMLButtonElement) => void;
+}) {
+  const title = post.title.trim() || m.common_untitled();
+  const untitled = !post.title.trim();
+  const published = post.status === "published";
+  const state = postStateOf({
+    published,
+    hasUnpublishedChanges: post.hasUnpublishedChanges,
+  });
+  const stateLabel = postStateLabel(state);
+  const date = sortBy === "publishedAt" ? post.publishedAt : post.updatedAt;
+  const { publicSlug } = post;
+  const shownTags = post.tags.slice(0, TAGS_SHOWN);
+
+  const actions: Array<ActionMenuItem> = [];
+  if (published && publicSlug)
+    actions.push({
+      label: m.admin_posts_view_published(),
+      icon: ArrowUpRight,
+      onSelect: () => openPublicPost(publicSlug),
+    });
+  actions.push({
+    label: post.pinnedAt
+      ? m.admin_posts_action_unpin()
+      : m.admin_posts_action_pin(),
+    icon: post.pinnedAt ? PinOff : Pin,
+    disabled: pinPending,
+    onSelect: onTogglePin,
+  });
+  if (published)
+    actions.push({
+      label: m.editor_header_unpublish(),
+      icon: EyeOff,
+      danger: true,
+      separator: true,
+      onSelect: onUnpublish,
+    });
+  actions.push({
+    label: m.admin_posts_action_delete_post(),
+    icon: Trash2,
+    danger: true,
+    separator: !published,
+    onSelect: onDelete,
+  });
+
+  const stateBadge = (
+    <span className="post-state" data-state={state}>
+      <i />
+      {stateLabel}
+    </span>
+  );
+  const time = date ? (
+    <time
+      dateTime={date.toISOString()}
+      title={formatDate(date, { includeTime: true })}
     >
-      [{" "}
-      {status === "published"
-        ? m.admin_posts_status_published()
-        : status === "draft"
-          ? m.admin_posts_status_draft()
-          : m.admin_posts_status_pending()}{" "}
-      ]
-    </Badge>
+      {formatTimeAgo(date)}
+    </time>
+  ) : (
+    "—"
+  );
+
+  return (
+    <div
+      className="post-row fuwari-list-card-row-in"
+      role="row"
+      style={order(index)}
+    >
+      <div className="post-main" role="cell">
+        <p className="post-title">
+          <Link
+            to="/admin/posts/edit/$id"
+            params={{ id: String(post.id) }}
+            data-untitled={untitled ? "" : undefined}
+          >
+            {title}
+          </Link>
+          {post.pinnedAt ? (
+            <Pin
+              size={13}
+              className="post-pin"
+              role="img"
+              aria-label={m.admin_posts_pinned()}
+            />
+          ) : null}
+        </p>
+        <p className="post-sub">
+          <span className="post-sub-only">
+            {stateBadge}
+            <i />
+            <span>{time}</span>
+            <i />
+          </span>
+          {post.category ? (
+            <b>{post.category.name}</b>
+          ) : (
+            <span>{m.post_uncategorized()}</span>
+          )}
+          {shownTags.map((item) => (
+            <span key={item.id}>#{item.name}</span>
+          ))}
+          {post.tags.length > shownTags.length ? (
+            <span>+{post.tags.length - shownTags.length}</span>
+          ) : null}
+        </p>
+      </div>
+      {stateBadge}
+      <span
+        className="post-num post-count"
+        role="cell"
+        data-zero={post.viewCount ? undefined : ""}
+        data-sorted={sortBy === "viewCount" ? "" : undefined}
+        title={
+          post.viewCount === undefined
+            ? noViewsHint(post, popularity)
+            : undefined
+        }
+      >
+        {post.viewCount === undefined ? "—" : formatCount(post.viewCount)}
+      </span>
+      <span
+        className="post-num post-count"
+        role="cell"
+        data-zero={post.commentCount ? undefined : ""}
+        data-sorted={sortBy === "commentCount" ? "" : undefined}
+      >
+        {formatCount(post.commentCount)}
+      </span>
+      <span className="post-time" role="cell">
+        {time}
+      </span>
+      <div className="post-acts" role="cell">
+        {published && publicSlug ? (
+          <IconButton
+            variant="quiet"
+            className="post-act"
+            label={m.admin_posts_view_published_named({ title })}
+            onClick={() => openPublicPost(publicSlug)}
+          >
+            <ArrowUpRight size={16} />
+          </IconButton>
+        ) : null}
+        <ActionMenu
+          label={m.admin_posts_more_named({ title })}
+          items={actions}
+          triggerClassName={iconButtonClass({
+            variant: "quiet",
+            className: "post-act post-more",
+          })}
+          placement="bottom-end"
+        />
+      </div>
+    </div>
   );
 }

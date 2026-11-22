@@ -3,6 +3,7 @@ import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 
 import { m } from "@/paraglide/messages";
+import { getLocale } from "@/paraglide/runtime";
 
 export const isSSR = typeof window === "undefined";
 
@@ -20,11 +21,6 @@ export function formatDate(
     return m.format_datetime({ date: d });
   }
   return m.format_date({ date: d });
-}
-
-export function formatTime(date: Date | undefined | null | string | number) {
-  if (!date) return "";
-  return m.format_time({ date: new Date(date) });
 }
 
 export function formatMonthDayTime(
@@ -50,11 +46,11 @@ export function formatTimeAgo(date: Date | null | string) {
   return m.time_ago_days({ count: diffInDays });
 }
 
-export function toLocalDateString(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+/** A whole number with the locale's thousands separators. */
+export function formatCount(value: number) {
+  return new Intl.NumberFormat(getLocale() === "zh" ? "zh-CN" : "en-US").format(
+    value,
+  );
 }
 
 export function formatBytes(bytes: number, decimals = 2) {

@@ -1,3 +1,5 @@
+import { inlineScriptJson } from "@/lib/inline-script-json";
+
 type ArticleJsonLdInput = {
   authorName: string;
   canonicalHref: string;
@@ -8,10 +10,11 @@ type ArticleJsonLdInput = {
     publishedAt?: Date | string | null;
     updatedAt: Date | string;
     tags?: Array<{ name: string }> | undefined;
+    image?: string | null;
   };
 };
 
-export function buildCanonicalHref(
+function buildCanonicalHref(
   pathname: string,
   searchParams?: Record<string, string | undefined>,
 ) {
@@ -81,5 +84,9 @@ export function buildArticleJsonLd({
     jsonLd.keywords = keywords;
   }
 
-  return JSON.stringify(jsonLd);
+  if (post.image) {
+    jsonLd.image = post.image;
+  }
+
+  return inlineScriptJson(jsonLd);
 }

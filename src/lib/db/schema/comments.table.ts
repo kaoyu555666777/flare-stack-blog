@@ -1,6 +1,7 @@
-import type { JSONContent } from "@tiptap/react";
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 import {
+  check,
   index,
   integer,
   primaryKey,
@@ -8,21 +9,18 @@ import {
   text,
 } from "drizzle-orm/sqlite-core";
 import { user } from "./auth.table";
+import { COMMENT_STATUSES, EMAIL_UNSUBSCRIBE_TYPES } from "../../enum-values";
 import { createdAt, id, updatedAt } from "./helper";
+import { MomentsTable } from "./moments.table";
 import { PostsTable } from "./posts.table";
 
-export const COMMENT_STATUSES = [
-  "pending",
-  "published",
-  "deleted",
-  "verifying",
-] as const;
+export { COMMENT_STATUSES, EMAIL_UNSUBSCRIBE_TYPES };
 
 export const CommentsTable = sqliteTable(
   "comments",
   {
     id,
-    content: text({ mode: "json" }).$type<JSONContent>(),
+    content: text(),
     rootId: integer("root_id").references(
       (): AnySQLiteColumn => CommentsTable.id,
       {
@@ -35,13 +33,22 @@ export const CommentsTable = sqliteTable(
     ),
     status: text("status", { enum: COMMENT_STATUSES })
       .notNull()
-      .default("verifying"),
-    aiReason: text("ai_reason"),
+      .default("published"),
 
-    postId: integer("post_id")
-      .notNull()
-      .references(() => PostsTable.id, { onDelete: "cascade" }),
+    // A Comment belongs to exactly one Post or one Moment (ADR 0037); the
+    // CHECK below holds every row to one of them.
+    postId: integer("post_id").references(() => PostsTable.id, {
+      onDelete: "cascade",
+    }),
+    momentId: integer("moment_id").references(() => MomentsTable.id, {
+      onDelete: "cascade",
+    }),
     userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
+    /**
+     * When an Admin dealt with the Comment, by replying or by marking it
+     * handled; it then no longer waits for a reply. Admin-only.
+     */
+    handledAt: integer("handled_at", { mode: "timestamp" }),
 
     createdAt,
     updatedAt,
@@ -52,13 +59,20 @@ export const CommentsTable = sqliteTable(
       table.rootId,
       table.createdAt,
     ),
+    index("comments_moment_root_created_idx").on(
+      table.momentId,
+      table.rootId,
+      table.createdAt,
+    ),
     index("comments_user_created_idx").on(table.userId, table.createdAt),
     index("comments_status_created_idx").on(table.status, table.createdAt),
     index("comments_global_created_idx").on(table.createdAt),
+    check(
+      "comments_one_target",
+      sql`(${table.postId} IS NULL) <> (${table.momentId} IS NULL)`,
+    ),
   ],
 );
-
-export const EMAIL_UNSUBSCRIBE_TYPES = ["reply_notification"] as const;
 
 export const EmailUnsubscriptionsTable = sqliteTable(
   "email_unsubscriptions",

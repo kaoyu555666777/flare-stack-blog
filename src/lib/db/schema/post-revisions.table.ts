@@ -1,15 +1,12 @@
 import type { JSONContent } from "@tiptap/react";
 import { relations } from "drizzle-orm";
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { POST_REVISION_REASONS } from "../../enum-values";
 import { createdAt, id } from "./helper";
 import type { PostStatus } from "./posts.table";
 import { PostsTable } from "./posts.table";
 
-export const POST_REVISION_REASONS = [
-  "auto",
-  "publish",
-  "restore_backup",
-] as const;
+export { POST_REVISION_REASONS };
 
 export interface PostRevisionSnapshot {
   title: string;
@@ -17,9 +14,10 @@ export interface PostRevisionSnapshot {
   slug: string;
   status: PostStatus;
   publishedAt: string | null;
-  readTimeInMinutes: number;
   contentJson: JSONContent | null;
   tagIds: Array<number>;
+  categoryId: number | null;
+  coverMediaId: number | null;
 }
 
 export const PostRevisionsTable = sqliteTable(

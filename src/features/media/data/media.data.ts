@@ -1,9 +1,51 @@
 import type { SQL } from "drizzle-orm";
-import { and, desc, eq, lt, sql, sum } from "drizzle-orm";
-import { escapeLikeString } from "@/features/media/data/helper";
-import { MediaTable, PostMediaTable } from "@/lib/db/schema";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gt,
+  inArray,
+  lt,
+  or,
+  sql,
+  sum,
+} from "drizzle-orm";
+import type { MediaSort } from "@/features/media/media.schema";
+import { containsText } from "@/lib/db/text-match";
+import {
+  MediaTable,
+  MomentImagesTable,
+  MomentsTable,
+  PostMediaTable,
+  PostRevisionMediaTable,
+  PostRevisionsTable,
+  PostsTable,
+  user,
+} from "@/lib/db/schema";
 
 export type Media = typeof MediaTable.$inferSelect;
+
+// An Admin's avatar picked from the media library is a reference, like a Post
+// image. Other users' avatar URLs are not, so they cannot pin media.
+const usedAsAdminAvatar = sql`exists (select 1 from ${user} where ${user.role} = 'admin' and instr(${user.image}, '/images/' || ${MediaTable.key}) > 0)`;
+
+// Nothing current uses the Media: no Post (draft, Public Content Snapshot or
+// cover), no Moment and no Admin's avatar. A Post Revision is not current.
+const unusedNow = sql`not exists (select 1 from ${PostMediaTable} where ${PostMediaTable.mediaId} = ${MediaTable.id}) and not exists (select 1 from ${MomentImagesTable} where ${MomentImagesTable.mediaId} = ${MediaTable.id}) and not ${usedAsAdminAvatar}`;
+
+// A Post Revision's images count too, so restoring it never brings back a
+// deleted image.
+const unreferenced = sql`${unusedNow} and not exists (select 1 from ${PostRevisionMediaTable} where ${PostRevisionMediaTable.mediaId} = ${MediaTable.id})`;
+
+export type MediaListItem = Media & {
+  postCount: number;
+  revisionOnlyPostCount: number;
+  revisionCount: number;
+  momentCount: number;
+  isCover: boolean;
+};
 
 export async function insertMedia(
   db: DB,
@@ -13,26 +55,159 @@ export async function insertMedia(
   return inserted;
 }
 
-export async function deleteMedia(db: DB, key: string) {
-  await db.delete(MediaTable).where(eq(MediaTable.key, key));
+export async function findMediaById(db: DB, id: number): Promise<Media | null> {
+  const [media] = await db
+    .select()
+    .from(MediaTable)
+    .where(eq(MediaTable.id, id))
+    .limit(1);
+  return media ?? null;
 }
 
+export async function findMediaByKey(
+  db: DB,
+  key: string,
+): Promise<Media | null> {
+  const [media] = await db
+    .select()
+    .from(MediaTable)
+    .where(eq(MediaTable.key, key))
+    .limit(1);
+  return media ?? null;
+}
+
+/**
+ * Deletes the Media with `key` unless something uses it: a Post (draft,
+ * Public Content Snapshot or cover), a Post Revision, a Moment or an Admin's
+ * avatar. The check and the delete are one statement, so a Post or Moment
+ * write that records the Media in the meantime (`mediaReferenceGuards`,
+ * `moments.data.ts`) makes it refuse. Returns whether it deleted.
+ */
+export async function deleteMediaIfUnused(db: DB, key: string) {
+  const deleted = await db
+    .delete(MediaTable)
+    .where(and(eq(MediaTable.key, key), unreferenced))
+    .returning({ id: MediaTable.id });
+  return deleted.length > 0;
+}
+
+/**
+ * Deletes the Media with `key` and the Post Revisions that use it, unless
+ * something current uses it: a Post (draft, Public Content Snapshot or
+ * cover), a Moment or an Admin's avatar. A Post's other revisions stay; the
+ * deleted revisions' image records go with them through the foreign key.
+ * Every statement of the batch carries the check, so a draft that starts
+ * using the image meanwhile makes it delete nothing at all. Returns null
+ * when it deleted nothing, else how many revisions it deleted.
+ */
+export async function deleteMediaWithRevisions(db: DB, key: string) {
+  const stillUnusedNow = sql`exists (select 1 from ${MediaTable} where ${MediaTable.key} = ${key} and ${unusedNow})`;
+  const [revisions, deleted] = await db.batch([
+    db
+      .delete(PostRevisionsTable)
+      .where(
+        and(
+          inArray(
+            PostRevisionsTable.id,
+            db
+              .select({ id: PostRevisionMediaTable.revisionId })
+              .from(PostRevisionMediaTable)
+              .innerJoin(
+                MediaTable,
+                eq(MediaTable.id, PostRevisionMediaTable.mediaId),
+              )
+              .where(eq(MediaTable.key, key)),
+          ),
+          stillUnusedNow,
+        ),
+      )
+      .returning({ id: PostRevisionsTable.id }),
+    // Once the revisions are gone, only a current use could stop this.
+    db
+      .delete(MediaTable)
+      .where(and(eq(MediaTable.key, key), unreferenced))
+      .returning({ id: MediaTable.id }),
+  ]);
+  return deleted.length > 0 ? { revisionCount: revisions.length } : null;
+}
+
+/** Returns false when no Media has `key`. */
 export async function updateMediaName(db: DB, key: string, name: string) {
-  await db
+  const renamed = await db
     .update(MediaTable)
     .set({ fileName: name })
-    .where(eq(MediaTable.key, key));
+    .where(eq(MediaTable.key, key))
+    .returning({ id: MediaTable.id });
+  return renamed.length > 0;
+}
+
+export async function updateMediaFile(
+  db: DB,
+  key: string,
+  data: {
+    url: string;
+    fileName: string;
+    mimeType: string;
+    sizeInBytes: number;
+    width: number | null | undefined;
+    height: number | null | undefined;
+  },
+): Promise<Media | null> {
+  const [updated] = await db
+    .update(MediaTable)
+    .set({
+      url: data.url,
+      fileName: data.fileName,
+      mimeType: data.mimeType,
+      sizeInBytes: data.sizeInBytes,
+      width: data.width ?? null,
+      height: data.height ?? null,
+    })
+    .where(eq(MediaTable.key, key))
+    .returning();
+  return updated ?? null;
 }
 
 const DEFAULT_PAGE_SIZE = 20;
 
 /**
- * 获取媒体列表 (Cursor-based pagination)
- * @param cursor - 上一页最后一条记录的 id，用于分页
- * @param limit - 每页数量
- * @param search - 搜索文件名
- * @param unusedOnly - 是否只显示未被引用的媒体
+ * The cursor is the id of the page's last item under every sort, so it never
+ * changes shape. Newest and oldest order by id, which follows the upload
+ * order; largest orders by size with the id as tie-break, and continues after
+ * the cursor item by comparing against that item's size. An item deleted
+ * between two pages ends a largest list early.
  */
+function sortPage(sort: MediaSort, cursor: number | undefined, db: DB) {
+  if (sort === "oldest") {
+    return {
+      after: cursor ? gt(MediaTable.id, cursor) : undefined,
+      order: [asc(MediaTable.id)],
+    };
+  }
+  if (sort === "largest") {
+    const cursorSize = sql`(${db
+      .select({ size: MediaTable.sizeInBytes })
+      .from(MediaTable)
+      .where(eq(MediaTable.id, cursor ?? 0))})`;
+    return {
+      after: cursor
+        ? or(
+            sql`${MediaTable.sizeInBytes} < ${cursorSize}`,
+            and(
+              sql`${MediaTable.sizeInBytes} = ${cursorSize}`,
+              lt(MediaTable.id, cursor),
+            ),
+          )
+        : undefined,
+      order: [desc(MediaTable.sizeInBytes), desc(MediaTable.id)],
+    };
+  }
+  return {
+    after: cursor ? lt(MediaTable.id, cursor) : undefined,
+    order: [desc(MediaTable.id)],
+  };
+}
+
 export async function getMediaList(
   db: DB,
   options?: {
@@ -40,80 +215,219 @@ export async function getMediaList(
     limit?: number;
     search?: string;
     unusedOnly?: boolean;
+    sort?: MediaSort;
   },
-): Promise<{ items: Array<Media>; nextCursor: number | null }> {
+): Promise<{ items: Array<MediaListItem>; nextCursor: number | null }> {
   const {
     cursor,
     limit = DEFAULT_PAGE_SIZE,
     search,
     unusedOnly,
+    sort = "newest",
   } = options ?? {};
 
-  // 构建条件
+  const { after, order } = sortPage(sort, cursor, db);
   const conditions: Array<SQL> = [];
-  if (cursor) {
-    conditions.push(lt(MediaTable.id, cursor));
+  if (after) {
+    conditions.push(after);
   }
   if (search) {
-    const pattern = `%${escapeLikeString(search)}%`;
-    conditions.push(sql`${MediaTable.fileName} LIKE ${pattern} ESCAPE '\\'`);
+    conditions.push(containsText(MediaTable.fileName, search));
   }
 
-  // 基础查询
-  const baseQuery = db.select().from(MediaTable).$dynamic();
-
-  // 如果只需要未引用的媒体
   if (unusedOnly) {
-    // 使用 LEFT JOIN 排除存在于 PostMediaTable 中的记录
-    const unusedQuery = db
-      .select({
-        media: MediaTable,
-        postMediaId: PostMediaTable.postId,
-      })
-      .from(MediaTable)
-      .leftJoin(PostMediaTable, eq(MediaTable.id, PostMediaTable.mediaId))
-      .$dynamic();
-
-    conditions.push(sql`${PostMediaTable.postId} IS NULL`);
-
-    const items = await unusedQuery
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
-      .orderBy(desc(MediaTable.id))
-      .limit(limit + 1)
-      .then((rows) => rows.map((row) => row.media));
-
-    // 判断是否有下一页
-    const hasMore = items.length > limit;
-    if (hasMore) {
-      items.pop(); // 移除多取的一条
-    }
-
-    const nextCursor = hasMore ? (items[items.length - 1]?.id ?? null) : null;
-
-    return { items, nextCursor };
+    conditions.push(unreferenced);
   }
 
-  // 常规查询
-  const items = await baseQuery
+  const items: Array<Media> = await db
+    .select()
+    .from(MediaTable)
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(MediaTable.id))
+    .orderBy(...order)
     .limit(limit + 1);
 
-  // 判断是否有下一页
   const hasMore = items.length > limit;
   if (hasMore) {
-    items.pop(); // 移除多取的一条
+    items.pop();
   }
 
   const nextCursor = hasMore ? (items[items.length - 1]?.id ?? null) : null;
 
-  return { items, nextCursor };
+  return { items: await withUsage(db, items), nextCursor };
+}
+
+export async function getUnusedMediaKeys(db: DB): Promise<Array<string>> {
+  const rows = await db
+    .select({ key: MediaTable.key })
+    .from(MediaTable)
+    .where(unreferenced);
+  return rows.map((row) => row.key);
+}
+
+export async function getMediaStats(db: DB) {
+  const [totals] = await db
+    .select({
+      totalCount: count(),
+      totalBytes: sum(MediaTable.sizeInBytes),
+    })
+    .from(MediaTable);
+
+  const [unused] = await db
+    .select({ unusedCount: count() })
+    .from(MediaTable)
+    .where(unreferenced);
+
+  return {
+    totalCount: Number(totals.totalCount ?? 0),
+    unusedCount: Number(unused.unusedCount ?? 0),
+    totalBytes: Number(totals.totalBytes ?? 0),
+  };
 }
 
 export async function getTotalMediaSize(db: DB) {
-  const [result] = await db
-    .select({ total: sum(MediaTable.sizeInBytes) })
-    .from(MediaTable);
+  const stats = await getMediaStats(db);
+  return stats.totalBytes;
+}
 
-  return Number(result.total ?? 0);
+const snapshotCoverMediaId = sql<
+  number | null
+>`json_extract(${PostsTable.publicSnapshotJson}, '$.cover.mediaId')`;
+
+// D1 binds at most 100 parameters a query, and the cover read binds each id
+// twice, so the usage reads take a page's ids this many at a time.
+const USAGE_ID_CHUNK = 50;
+
+async function withUsage(
+  db: DB,
+  items: Array<Media>,
+): Promise<Array<MediaListItem>> {
+  if (items.length === 0) return [];
+
+  // Each row is about one Media, so the chunks' rows never overlap.
+  const allIds = items.map((item) => item.id);
+  const chunks = Array.from(
+    { length: Math.ceil(allIds.length / USAGE_ID_CHUNK) },
+    (_, i) => allIds.slice(i * USAGE_ID_CHUNK, (i + 1) * USAGE_ID_CHUNK),
+  );
+  const perChunk = async <T>(
+    read: (ids: Array<number>) => PromiseLike<Array<T>>,
+  ) => (await Promise.all(chunks.map(read))).flat();
+  const [postRows, revisionRows, coverRows, momentRows] = await Promise.all([
+    perChunk((ids) =>
+      db
+        .select({
+          mediaId: PostMediaTable.mediaId,
+          postId: PostMediaTable.postId,
+        })
+        .from(PostMediaTable)
+        .where(inArray(PostMediaTable.mediaId, ids)),
+    ),
+    perChunk((ids) =>
+      db
+        .select({
+          mediaId: PostRevisionMediaTable.mediaId,
+          postId: PostRevisionsTable.postId,
+          revisionCount: sql<number>`count(distinct ${PostRevisionsTable.id})`,
+        })
+        .from(PostRevisionMediaTable)
+        .innerJoin(
+          PostRevisionsTable,
+          eq(PostRevisionsTable.id, PostRevisionMediaTable.revisionId),
+        )
+        .where(inArray(PostRevisionMediaTable.mediaId, ids))
+        .groupBy(PostRevisionMediaTable.mediaId, PostRevisionsTable.postId),
+    ),
+    perChunk((ids) =>
+      db
+        .select({
+          coverMediaId: PostsTable.coverMediaId,
+          snapshotCoverMediaId,
+        })
+        .from(PostsTable)
+        .where(
+          or(
+            inArray(PostsTable.coverMediaId, ids),
+            inArray(snapshotCoverMediaId, ids),
+          ),
+        ),
+    ),
+    perChunk((ids) =>
+      db
+        .select({
+          mediaId: MomentImagesTable.mediaId,
+          momentCount: sql<number>`count(distinct ${MomentImagesTable.momentId})`,
+        })
+        .from(MomentImagesTable)
+        .where(inArray(MomentImagesTable.mediaId, ids))
+        .groupBy(MomentImagesTable.mediaId),
+    ),
+  ]);
+  const momentCounts = new Map(
+    momentRows.map((row) => [row.mediaId, Number(row.momentCount)]),
+  );
+
+  const groupByMedia = (rows: Array<{ mediaId: number; postId: number }>) => {
+    const postIdsById = new Map<number, Set<number>>();
+    for (const row of rows) {
+      const postIds = postIdsById.get(row.mediaId) ?? new Set<number>();
+      postIds.add(row.postId);
+      postIdsById.set(row.mediaId, postIds);
+    }
+    return postIdsById;
+  };
+  const currentPostIds = groupByMedia(postRows);
+  const revisionPostIds = groupByMedia(revisionRows);
+  const revisionCounts = new Map<number, number>();
+  for (const row of revisionRows) {
+    revisionCounts.set(
+      row.mediaId,
+      (revisionCounts.get(row.mediaId) ?? 0) + Number(row.revisionCount),
+    );
+  }
+  const coverIds = new Set<number>();
+  for (const row of coverRows) {
+    if (row.coverMediaId != null) coverIds.add(row.coverMediaId);
+    if (row.snapshotCoverMediaId != null) {
+      coverIds.add(Number(row.snapshotCoverMediaId));
+    }
+  }
+
+  return items.map((item) => ({
+    ...item,
+    postCount: currentPostIds.get(item.id)?.size ?? 0,
+    // A post that also uses the image in its draft or published version is
+    // already in postCount.
+    revisionOnlyPostCount: [...(revisionPostIds.get(item.id) ?? [])].filter(
+      (postId) => !currentPostIds.get(item.id)?.has(postId),
+    ).length,
+    revisionCount: revisionCounts.get(item.id) ?? 0,
+    momentCount: momentCounts.get(item.id) ?? 0,
+    isCover: coverIds.has(item.id),
+  }));
+}
+
+export async function deleteUnusedMedia(db: DB): Promise<Array<string>> {
+  const rows = await db
+    .delete(MediaTable)
+    .where(unreferenced)
+    .returning({ key: MediaTable.key });
+  return rows.map((row) => row.key);
+}
+
+/**
+ * The Moments that show the image, newest first. A Moment that shows it
+ * twice is listed once.
+ */
+export async function getMomentsByMediaKey(db: DB, key: string) {
+  return await db
+    .selectDistinct({
+      id: MomentsTable.id,
+      text: MomentsTable.text,
+      postedAt: MomentsTable.postedAt,
+    })
+    .from(MomentImagesTable)
+    .innerJoin(MediaTable, eq(MediaTable.id, MomentImagesTable.mediaId))
+    .innerJoin(MomentsTable, eq(MomentsTable.id, MomentImagesTable.momentId))
+    .where(eq(MediaTable.key, key))
+    .orderBy(desc(MomentsTable.postedAt), desc(MomentsTable.id));
 }

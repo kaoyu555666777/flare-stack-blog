@@ -1,186 +1,111 @@
-import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
-import type {
-  GetPostsCountInput,
-  GetPostsInput,
-} from "@/features/posts/schema/posts.schema";
+import type { GetPostsInput } from "@/features/posts/schema/posts.schema";
 import {
+  normalizePostCategoryName,
   normalizePostTagName,
-  PostItemSchema,
-  PostListResponseSchema,
-  PostWithTocSchema,
-} from "@/features/posts/schema/posts.schema";
-import { apiClient } from "@/lib/api-client";
-import { isSSR } from "@/lib/utils";
+} from "@/features/posts/utils/post-public-search";
+import { orpc } from "@/lib/orpc";
 import {
-  getPostRevisionFn,
-  listPostRevisionsFn,
-} from "../api/post-revisions.admin.api";
-import { findPostByIdFn } from "../api/posts.admin.api";
-import {
-  findPostBySlugFn,
-  getPinnedPostsFn,
-  getPopularPostsFn,
-  getPostsCursorFn,
-  getRelatedPostsFn,
-} from "../api/posts.public.api";
+  emptyListOnNotFound,
+  nullOnNotFound,
+} from "@/lib/orpc/null-on-not-found";
 
-export const POSTS_KEYS = {
-  all: ["posts"] as const,
-
-  // Parent keys (static arrays for prefix invalidation)
-  pinned: ["posts", "pinned"] as const,
-  lists: ["posts", "list"] as const,
-  details: ["posts", "detail"] as const,
-  recent: ["posts", "recent"] as const,
-  popular: ["posts", "popular"] as const,
-  adminLists: ["posts", "admin-list"] as const,
-  counts: ["posts", "count"] as const,
-  revisions: ["posts", "revisions"] as const,
-  revisionDetails: ["posts", "revision-detail"] as const,
-
-  // Child keys (functions for specific queries)
-  list: (filters: { tagName?: string; limit?: number } = {}) =>
-    [
-      "posts",
-      "list",
-      {
-        ...filters,
-        tagName: normalizePostTagName(filters.tagName),
-      },
-    ] as const,
-  detail: (idOrSlug: number | string) => ["posts", "detail", idOrSlug] as const,
-  related: (slug: string, limit?: number) =>
-    ["posts", "related", slug, limit] as const,
-  adminList: (params: GetPostsInput) =>
-    ["posts", "admin-list", params] as const,
-  count: (params: GetPostsCountInput) => ["posts", "count", params] as const,
-  revisionList: (postId: number) => ["posts", "revisions", postId] as const,
-  revisionDetail: (postId: number, revisionId: number) =>
-    ["posts", "revision-detail", postId, revisionId] as const,
-};
-
-export function recentPostsQuery(limit: number) {
-  return queryOptions({
-    queryKey: [...POSTS_KEYS.recent, limit],
-    queryFn: async () => {
-      if (isSSR) {
-        const result = await getPostsCursorFn({ data: { limit } });
-        return result.items;
-      }
-      const res = await apiClient.posts.$get({
-        query: { limit: String(limit) },
-      });
-      if (!res.ok) throw new Error("Failed to fetch posts");
-      return PostListResponseSchema.parse(await res.json()).items;
-    },
-  });
+export function homePostsQuery(page: number) {
+  return orpc.posts.home.queryOptions({ input: { page } });
 }
 
 export function postsInfiniteQueryOptions(
-  filters: { tagName?: string; limit?: number } = {},
+  filters: {
+    tagName?: string;
+    categoryName?: string;
+    uncategorized?: boolean;
+    limit?: number;
+  } = {},
 ) {
   const pageSize = filters.limit ?? 12;
   const tagName = normalizePostTagName(filters.tagName);
-  return infiniteQueryOptions({
-    queryKey: POSTS_KEYS.list({ ...filters, tagName }),
-    queryFn: async ({ pageParam }) => {
-      if (isSSR) {
-        return await getPostsCursorFn({
-          data: {
-            cursor: pageParam,
-            limit: pageSize,
-            tagName,
-          },
-        });
-      }
-      const res = await apiClient.posts.$get({
-        query: {
-          cursor: pageParam?.toString(),
-          limit: String(pageSize),
-          tagName,
-        },
-      });
-      if (!res.ok) throw new Error("Failed to fetch posts");
-      return PostListResponseSchema.parse(await res.json());
-    },
-    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+  const categoryName = normalizePostCategoryName(filters.categoryName);
+  const uncategorized = filters.uncategorized === true;
+  return orpc.posts.list.infiniteOptions({
+    input: (pageParam: number | undefined) => ({
+      cursor: pageParam,
+      limit: pageSize,
+      tagName,
+      categoryName: uncategorized ? undefined : categoryName,
+      uncategorized: uncategorized || undefined,
+    }),
     initialPageParam: undefined as number | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
   });
 }
 
+/** Resolves to null for a slug no published post has (the server answers 404). */
 export function postBySlugQuery(slug: string) {
-  return queryOptions({
-    queryKey: POSTS_KEYS.detail(slug),
-    queryFn: async () => {
-      if (isSSR) {
-        return await findPostBySlugFn({ data: { slug } });
-      }
-      const res = await apiClient.post[":slug"].$get({ param: { slug } });
-      if (!res.ok) throw new Error("Failed to fetch post");
-      return PostWithTocSchema.parse(await res.json());
-    },
-  });
+  return nullOnNotFound(
+    orpc.posts.bySlug.queryOptions({ input: { slug } }),
+    "POST_NOT_FOUND",
+  );
 }
 
+/** Resolves to null for a post that does not exist (the server answers 404). */
 export function postByIdQuery(id: number) {
-  return queryOptions({
-    queryKey: POSTS_KEYS.detail(id),
-    queryFn: () => findPostByIdFn({ data: { id } }),
-  });
+  return nullOnNotFound(
+    orpc.posts.admin.get.queryOptions({ input: { id } }),
+    "POST_NOT_FOUND",
+  );
 }
 
-export function relatedPostsQuery(slug: string, limit?: number) {
-  return queryOptions({
-    queryKey: POSTS_KEYS.related(slug, limit),
-    queryFn: async () => {
-      if (isSSR) {
-        return await getRelatedPostsFn({ data: { slug, limit } });
-      }
-      const res = await apiClient.post[":slug"].related.$get({
-        param: { slug },
-        query: { limit: limit != null ? String(limit) : undefined },
-      });
-      if (!res.ok) throw new Error("Failed to fetch related posts");
-      const json = await res.json();
-      const result = PostItemSchema.array().safeParse(json);
-      if (!result.success) {
-        console.error(
-          JSON.stringify({
-            message: "related posts response parse failed",
-            error: result.error.message,
-            received: typeof json,
-          }),
-        );
-        return [];
-      }
-      return result.data;
-    },
-  });
+export function adminPostsQuery(input: GetPostsInput) {
+  return orpc.posts.admin.list.queryOptions({ input });
 }
 
+export function adjacentPostsQuery(slug: string) {
+  return orpc.posts.adjacent.queryOptions({ input: { slug } });
+}
+
+/** Resolves to no revisions for a post that does not exist (the server answers 404). */
 export function postRevisionListQuery(postId: number) {
-  return queryOptions({
-    queryKey: POSTS_KEYS.revisionList(postId),
-    queryFn: () => listPostRevisionsFn({ data: { postId } }),
-  });
+  return emptyListOnNotFound(
+    orpc.posts.admin.revisions.list.queryOptions({
+      input: { postId },
+    }),
+    "POST_NOT_FOUND",
+  );
 }
 
+/** Resolves to null for a revision the post does not have (the server answers 404). */
 export function postRevisionDetailQuery(postId: number, revisionId: number) {
-  return queryOptions({
-    queryKey: POSTS_KEYS.revisionDetail(postId, revisionId),
-    queryFn: async () =>
-      (await getPostRevisionFn({ data: { postId, revisionId } })) ?? null,
-  });
+  return nullOnNotFound(
+    orpc.posts.admin.revisions.get.queryOptions({
+      input: { postId, revisionId },
+    }),
+    "POST_REVISION_NOT_FOUND",
+  );
 }
 
-export const pinnedPostsQuery = queryOptions({
-  queryKey: POSTS_KEYS.pinned,
-  queryFn: () => getPinnedPostsFn(),
-});
+/**
+ * The post with its body as Markdown, for a diff: the draft's body in
+ * `contentMarkdown`. Resolves to null for a post that does not exist (the
+ * server answers 404).
+ */
+export function postMarkdownByIdQuery(id: number) {
+  return nullOnNotFound(
+    orpc.posts.admin.get.queryOptions({
+      input: { id, contentFormat: "markdown" },
+    }),
+    "POST_NOT_FOUND",
+  );
+}
+
+/** A revision's snapshot with its body as Markdown, for a diff. */
+export function postRevisionMarkdownQuery(postId: number, revisionId: number) {
+  return nullOnNotFound(
+    orpc.posts.admin.revisions.get.queryOptions({
+      input: { postId, revisionId, contentFormat: "markdown" },
+    }),
+    "POST_REVISION_NOT_FOUND",
+  );
+}
 
 export function popularPostsQuery(limit?: number) {
-  return queryOptions({
-    queryKey: [...POSTS_KEYS.popular, limit],
-    queryFn: () => getPopularPostsFn({ data: { limit } }),
-  });
+  return orpc.posts.popular.queryOptions({ input: { limit } });
 }

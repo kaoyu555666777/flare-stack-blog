@@ -1,0 +1,188 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { useParams } from "@tanstack/react-router";
+import { Clock, FileText } from "lucide-react";
+import {
+  getPublicImageSrc,
+  PUBLIC_IMAGE_WIDTH,
+} from "@/features/media/utils/media.utils";
+import { findCachedPublicPost } from "@/features/posts/utils/cached-public-post";
+import { useThemeRecipe } from "@/features/theme/components/theme-recipe";
+import { Skeleton } from "@/components/ui/skeleton";
+import { m } from "@/paraglide/messages";
+import { cn } from "@/lib/utils";
+import { PostMeta } from "./post-meta";
+import { PostSummary } from "./post-summary";
+
+/**
+ * Stands for one item of a meta row and is as tall as that row in either
+ * form: the icon block of a chip, or a line of plain text with its dot.
+ */
+function MetaChip() {
+  const { meta } = useThemeRecipe();
+  return (
+    <div className="flex h-6 items-center">
+      {meta === "chips" ? (
+        <Skeleton className="mr-2 h-6 w-6 rounded-md" />
+      ) : null}
+      <Skeleton className="h-3.5 w-16" />
+    </div>
+  );
+}
+
+function Paragraph({ widths }: { widths: Array<string> }) {
+  return (
+    <div className="space-y-3">
+      {widths.map((width, index) => (
+        <Skeleton key={`${width}-${index}`} className={cn("h-3.5", width)} />
+      ))}
+    </div>
+  );
+}
+
+function ArticleBodySkeleton() {
+  return (
+    <div>
+      <Paragraph
+        widths={["w-full", "w-full", "w-full", "w-[96%]", "w-[88%]"]}
+      />
+      <Skeleton className="mt-8 mb-4 h-6 w-2/5" />
+      <Paragraph widths={["w-full", "w-full", "w-full", "w-full", "w-[72%]"]} />
+      <Skeleton className="my-8 h-36 w-full rounded-xl" />
+      <Skeleton className="mt-8 mb-4 h-6 w-1/3" />
+      <Paragraph
+        widths={["w-full", "w-full", "w-full", "w-[94%]", "w-[81%]"]}
+      />
+      <div className="mt-6">
+        <Paragraph widths={["w-full", "w-full", "w-[90%]", "w-[64%]"]} />
+      </div>
+    </div>
+  );
+}
+
+export function PostPageSkeleton() {
+  const { slug } = useParams({ strict: false });
+  const queryClient = useQueryClient();
+  const cached =
+    typeof slug === "string"
+      ? findCachedPublicPost(queryClient, slug)
+      : undefined;
+  const wordCount = cached ? cached.readTimeInMinutes * 300 : 0;
+  const recipe = useThemeRecipe();
+  const inlineMeta = recipe.meta === "inline";
+
+  return (
+    <div className="relative mb-4 flex w-full flex-col gap-4 rounded-(--theme-card-radius) py-1 md:bg-transparent md:py-0">
+      <div className="fuwari-card-base fuwari-card-panel relative z-10 w-full px-[var(--theme-panel-pad-x,1.5rem)] pb-4 pt-6 md:px-[var(--theme-panel-pad-x,2.25rem)]">
+        <div
+          className={
+            inlineMeta
+              ? "mb-3 flex flex-row flex-wrap gap-x-2 gap-y-1 fuwari-text-30 fuwari-meta-inline"
+              : "mb-3 flex flex-row flex-wrap gap-5 fuwari-text-30"
+          }
+        >
+          {cached ? (
+            <>
+              <div className="flex flex-row items-center">
+                {inlineMeta ? null : (
+                  <div className="mr-2 flex h-6 w-6 items-center justify-center rounded-md bg-(--fuwari-ink-faint) fuwari-text-50">
+                    <FileText strokeWidth={1.5} size={16} />
+                  </div>
+                )}
+                <div className="text-sm">
+                  {m.post_word_count({ count: wordCount })}
+                </div>
+              </div>
+              <div className="flex flex-row items-center">
+                {inlineMeta ? null : (
+                  <div className="mr-2 flex h-6 w-6 items-center justify-center rounded-md bg-(--fuwari-ink-faint) fuwari-text-50">
+                    <Clock strokeWidth={1.5} size={16} />
+                  </div>
+                )}
+                <div className="text-sm">
+                  {m.read_time({ count: cached.readTimeInMinutes })}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="flex gap-5">
+              <MetaChip />
+              <MetaChip />
+            </div>
+          )}
+        </div>
+
+        <div className="relative">
+          {cached ? (
+            <h1
+              className={
+                recipe.headingAccent === "on"
+                  ? "fuwari-heading fuwari-page-title relative mb-3 block w-full font-bold fuwari-text-90 md:before:absolute md:before:top-3 md:before:-left-4.5 md:before:h-5 md:before:w-1 md:before:rounded-md md:before:bg-(--theme-accent)"
+                  : "fuwari-heading fuwari-page-title relative mb-3 block w-full font-bold fuwari-text-90"
+              }
+              style={
+                typeof slug === "string"
+                  ? { viewTransitionName: `post-title-${slug}` }
+                  : undefined
+              }
+            >
+              {cached.title}
+            </h1>
+          ) : (
+            // One line of the title, in the Theme's size for it.
+            <Skeleton className="fuwari-page-title mb-3 h-[1lh] w-4/5" />
+          )}
+        </div>
+
+        {cached ? (
+          <>
+            <PostMeta post={cached} className="mb-5" />
+            {!cached.cover && <div className="fuwari-meta-rule mb-5" />}
+          </>
+        ) : (
+          <div className="mb-5 flex flex-wrap gap-4">
+            <MetaChip />
+            <MetaChip />
+            <MetaChip />
+          </div>
+        )}
+
+        {cached?.cover ? (
+          <div className="mb-8 overflow-hidden rounded-(--theme-cover-radius)">
+            <img
+              src={getPublicImageSrc(
+                cached.cover.url,
+                PUBLIC_IMAGE_WIDTH.cover,
+              )}
+              alt={cached.title}
+              width={cached.cover.width ?? undefined}
+              height={cached.cover.height ?? undefined}
+              className="h-auto w-full object-cover"
+            />
+          </div>
+        ) : null}
+
+        {cached?.summary ? <PostSummary summary={cached.summary} /> : null}
+
+        <div className="mb-6">
+          <ArticleBodySkeleton />
+        </div>
+
+        <div className="my-8 flex w-full items-center justify-center">
+          <div className="h-px w-full bg-linear-to-r from-transparent via-(--theme-rule,var(--fuwari-meta-divider)) to-transparent opacity-20" />
+          <span className="mx-4 whitespace-nowrap font-mono text-sm tracking-widest text-(--theme-rule,var(--fuwari-meta-divider)) opacity-50">
+            END
+          </span>
+          <div className="h-px w-full bg-linear-to-r from-(--theme-rule,var(--fuwari-meta-divider)) via-transparent to-transparent opacity-20" />
+        </div>
+      </div>
+
+      <div className="fuwari-card-base fuwari-card-panel py-6 px-[var(--theme-panel-pad-x,1.5rem)]">
+        <Skeleton className="mb-5 h-5 w-24" />
+        <div className="space-y-4">
+          <Skeleton className="h-16 w-full rounded-xl" />
+          <Skeleton className="h-16 w-full rounded-xl" />
+        </div>
+      </div>
+    </div>
+  );
+}

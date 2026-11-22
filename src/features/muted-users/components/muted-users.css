@@ -1,0 +1,88 @@
+/*
+ * 禁言名单: a list body. The frame's second row holds the search and the
+ * sort; a row is avatar, name, muted since and 解除, on the frame's list row.
+ */
+.muted-users {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.muted-users > div:first-child {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+.muted-row {
+  height: var(--admin-row-max);
+  min-height: 0;
+}
+.muted-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  background: var(--admin-press);
+  color: var(--admin-fg-3);
+  overflow: hidden;
+}
+.muted-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.muted-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--admin-text-body);
+  line-height: var(--admin-leading-body);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.muted-since {
+  flex-shrink: 0;
+  color: var(--admin-fg-3);
+  font-size: var(--admin-text-meta);
+  line-height: var(--admin-leading-meta);
+  font-variant-numeric: tabular-nums;
+}
+.muted-footer {
+  padding: 10px var(--admin-row-x) 4px;
+  font-size: var(--admin-text-meta);
+  line-height: var(--admin-leading-meta);
+  color: var(--admin-fg-3);
+}
+.muted-footer:empty {
+  display: none;
+}
+@media (max-width: 600px) {
+  /* The date goes under the name; the avatar and 解除 span both lines. */
+  .admin-list-row.muted-row:not([data-skeleton]) {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    align-content: center;
+    column-gap: 10px;
+  }
+  .muted-row > :first-child,
+  .muted-row > :last-child {
+    grid-row: 1 / 3;
+  }
+  .muted-row > .muted-name {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: end;
+  }
+  .muted-row > .muted-since {
+    grid-column: 2;
+    grid-row: 2;
+    align-self: start;
+  }
+  .muted-row > :last-child {
+    grid-column: 3;
+  }
+}

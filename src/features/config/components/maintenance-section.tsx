@@ -1,22 +1,20 @@
+import { SettingsLead } from "@/features/config/components/admin/settings-lead";
+import { m } from "@/paraglide/messages";
 import { CacheMaintenance } from "@/features/cache/components/cache-maintenance";
-import { BackupRestoreSection } from "@/features/import-export/components/backup-restore-section";
+import { PostPopularityMaintenance } from "@/features/post-popularity/components/post-popularity-maintenance";
 import { SearchMaintenance } from "@/features/search/components/search-maintenance";
-import { VersionMaintenance } from "@/features/version/components/version-maintenance";
 
+/** The Maintenance actions as tiles, two to a row; what cannot be undone says so. */
 export function MaintenanceSection() {
   return (
-    <div className="space-y-12 animate-in fade-in slide-in-from-bottom-2 duration-700">
-      <section className="border border-border/30 bg-background/50 p-8">
-        <VersionMaintenance />
-      </section>
-
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-10">
+    <div className="settings-maintenance-list">
+      <SettingsLead
+        description={`${m.settings_design_maintenance_hint()}${m.settings_design_immediate()}`}
+      />
+      <div className="settings-maintenance-grid">
+        <PostPopularityMaintenance />
         <SearchMaintenance />
         <CacheMaintenance />
-      </div>
-
-      <div className="pt-4 border-t border-border/20">
-        <BackupRestoreSection />
       </div>
     </div>
   );

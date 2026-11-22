@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/mini";
 
 const REQUEST_ERROR_PREFIX = "__REQ_ERR__:";
 
@@ -11,11 +11,11 @@ const RequestErrorPayloadSchema = z.discriminatedUnion("code", [
   }),
   z.object({
     code: z.literal("RATE_LIMITED"),
-    retryAfterMs: z.number().int().nonnegative(),
+    retryAfterMs: z.int().check(z.nonnegative()),
   }),
   z.object({
     code: z.literal("TURNSTILE_FAILED"),
-    detail: z.enum(["MISSING_TOKEN", "VERIFY_FAILED"]).optional(),
+    detail: z.optional(z.enum(["MISSING_TOKEN", "VERIFY_FAILED"])),
   }),
 ]);
 
@@ -24,9 +24,6 @@ const RequestErrorEnvelopeSchema = z.object({
   error: RequestErrorPayloadSchema,
 });
 
-export type RequestErrorCode = z.infer<
-  typeof RequestErrorPayloadSchema
->["code"];
 export type RequestErrorPayload = z.infer<typeof RequestErrorPayloadSchema>;
 export type ParsedRequestError =
   | RequestErrorPayload
@@ -34,42 +31,6 @@ export type ParsedRequestError =
       code: "UNKNOWN";
       message: string;
     };
-
-function formatRequestErrorMessage(payload: RequestErrorPayload): string {
-  return `${REQUEST_ERROR_PREFIX}${JSON.stringify({ v: 1, error: payload })}`;
-}
-
-function createRequestError(payload: RequestErrorPayload): Error {
-  return new Error(formatRequestErrorMessage(payload));
-}
-
-export function createAuthError(): Error {
-  return createRequestError({
-    code: "UNAUTHENTICATED",
-  });
-}
-
-export function createPermissionError(): Error {
-  return createRequestError({
-    code: "PERMISSION_DENIED",
-  });
-}
-
-export function createRateLimitError(retryAfterMs: number): Error {
-  return createRequestError({
-    code: "RATE_LIMITED",
-    retryAfterMs,
-  });
-}
-
-export function createTurnstileError(
-  detail: "MISSING_TOKEN" | "VERIFY_FAILED" = "VERIFY_FAILED",
-): Error {
-  return createRequestError({
-    code: "TURNSTILE_FAILED",
-    detail,
-  });
-}
 
 function parseEnvelopeFromMessage(message: string): RequestErrorPayload | null {
   if (!message.startsWith(REQUEST_ERROR_PREFIX)) {
@@ -88,7 +49,11 @@ function parseEnvelopeFromMessage(message: string): RequestErrorPayload | null {
 
 export function parseRequestError(error: unknown): ParsedRequestError {
   const rawMessage =
-    error instanceof Error ? error.message : String(error ?? "");
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "";
 
   const payload = parseEnvelopeFromMessage(rawMessage);
   if (!payload) {

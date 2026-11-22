@@ -4,244 +4,186 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import { ORPCError } from "@orpc/client";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
+import { useCallback } from "react";
+import { toast } from "@/lib/toast";
 import {
-  deleteImageFn,
-  updateMediaNameFn,
-} from "@/features/media/api/media.api";
-import {
-  linkedMediaKeysQuery,
-  MEDIA_KEYS,
   mediaInfiniteQueryOptions,
-  totalMediaSizeQuery,
+  mediaStatsQuery,
 } from "@/features/media/queries";
-import { useDebounce } from "@/hooks/use-debounce";
+import type { MediaSort } from "@/features/media/media.schema";
+import { orpc, orpcClient } from "@/lib/orpc";
 import { m } from "@/paraglide/messages";
+import { MediaInUseError, mediaInUseMessage } from "../media-usage";
+
+/** Counts the posts and Moments that use the image now, for the refusal's message. */
+async function mediaInUseError(key: string) {
+  const [posts, moments] = await Promise.all([
+    orpcClient.media.linkedPosts({ key }).catch(() => []),
+    orpcClient.media.linkedMoments({ key }).catch(() => []),
+  ]);
+  return new MediaInUseError(
+    mediaInUseMessage({ posts: posts.length, moments: moments.length }),
+  );
+}
 
 export function useMediaLibrary() {
   const queryClient = useQueryClient();
   const navigate = useNavigate({ from: "/admin/media/" });
-  const { search, unused } = useSearch({ from: "/admin/media/" });
+  const { unused, view, search, sort } = useSearch({ from: "/admin/media/" });
 
-  // Search Param Handlers
-  const setSearchQuery = (term: string) => {
-    navigate({
-      search: (prev) => ({ ...prev, search: term }),
+  const setUnusedOnly = (val: boolean) => {
+    void navigate({
+      search: (prev) => ({ ...prev, unused: val || undefined }),
+    });
+  };
+
+  const setSearch = (value: string) => {
+    void navigate({
+      search: (prev) => ({ ...prev, search: value || undefined }),
       replace: true,
     });
   };
 
-  const setUnusedOnly = (val: boolean) => {
-    navigate({
-      search: (prev) => ({ ...prev, unused: val }),
+  const setSort = (value: MediaSort) => {
+    void navigate({
+      search: (prev) => ({
+        ...prev,
+        sort: value === "newest" ? undefined : value,
+      }),
+      replace: true,
     });
   };
 
-  const debouncedSearch = useDebounce(search, 300);
-
-  // Selection & Deletion State (使用 key 作为唯一标识)
-  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(
-    () => new Set(),
-  );
-  const [deleteTarget, setDeleteTarget] = useState<Array<string> | null>(null);
-
-  // Infinite Query for media list
   const {
     data,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
     isPending,
+    isError,
+    isFetchNextPageError,
     refetch,
   } = useInfiniteQuery({
-    ...mediaInfiniteQueryOptions(debouncedSearch, unused),
+    ...mediaInfiniteQueryOptions(search?.trim(), unused ?? false, sort),
   });
 
-  // Flatten all pages into a single array
-  const mediaItems = useMemo(() => {
-    return data?.pages.flatMap((page) => page.items) ?? [];
-  }, [data]);
+  const mediaItems = data?.pages.flatMap((page) => page.items) ?? [];
+  const { data: stats } = useQuery(mediaStatsQuery);
 
-  // Get all visible media keys
-  const mediaKeys = useMemo(
-    () => mediaItems.map((item) => item.key),
-    [mediaItems],
-  );
+  const invalidate = () =>
+    queryClient.invalidateQueries({ queryKey: orpc.media.key() });
 
-  const { data: linkedKeysData } = useQuery({
-    ...linkedMediaKeysQuery(mediaKeys),
-    enabled: mediaKeys.length > 0,
-  });
-
-  const { data: totalMediaSize } = useQuery(totalMediaSizeQuery);
-
-  // Build linkedMediaIds set
-  const linkedMediaIds = useMemo(() => {
-    return new Set<string>(linkedKeysData ?? []);
-  }, [linkedKeysData]);
-
-  // Clear selections when filters changes (actual data refresh)
-  // We use the DEBOUNCED search here because that's what triggers the query
-  useEffect(() => {
-    setSelectedKeys(new Set());
-    setDeleteTarget(null);
-  }, [debouncedSearch, unused]);
-
-  // Delete mutation
   const deleteMutation = useMutation({
-    mutationFn: async (keys: Array<string>) => {
-      const deletedKeys: Array<string> = [];
-
+    /**
+     * `withRevisions` also deletes the Post Revisions that alone use an
+     * image; only the detail of such an image asks for it.
+     */
+    mutationFn: async ({
+      keys,
+      withRevisions,
+    }: {
+      keys: Array<string>;
+      withRevisions?: boolean;
+    }) => {
+      // What the server deleted, which the confirmation's count may predate.
+      let deletedRevisionCount = 0;
       for (const key of keys) {
-        const result = await deleteImageFn({ data: { key } });
-        if (result.error) {
-          return { deletedKeys, error: result.error };
+        try {
+          const result = await orpcClient.media.remove({ key, withRevisions });
+          deletedRevisionCount += result.deletedRevisionCount ?? 0;
+        } catch (error) {
+          if (error instanceof ORPCError && error.code === "MEDIA_IN_USE") {
+            // The list was stale: show what uses the image now.
+            await invalidate();
+            throw await mediaInUseError(key);
+          }
+          throw error;
         }
-        deletedKeys.push(key);
       }
-
-      return { deletedKeys: keys, error: null };
+      return { deletedRevisionCount };
     },
-    onSuccess: (result) => {
-      const deletedKeys = result.deletedKeys;
-
-      if (deletedKeys.length > 0) {
-        // 刷新列表
-        queryClient.invalidateQueries({ queryKey: MEDIA_KEYS.all });
-        // 清除选择
-        setSelectedKeys((prev) => {
-          const next = new Set(prev);
-          deletedKeys.forEach((key) => next.delete(key));
-          return next;
-        });
-      }
-
-      if (result.error) {
-        if (deletedKeys.length > 0) {
-          toast.warning(m.media_toast_partial_delete(), {
-            description: m.media_toast_partial_delete_desc({
-              count: deletedKeys.length,
-            }),
-          });
-        } else {
-          toast.warning(m.media_toast_delete_fail(), {
-            description: m.media_toast_delete_fail_desc(),
-          });
-        }
-        return;
-      }
-
-      toast.success(m.media_toast_delete_success(), {
-        description: m.media_toast_delete_success_desc({
-          count: deletedKeys.length,
-        }),
-      });
+    onSuccess: async ({ deletedRevisionCount }, { withRevisions }) => {
+      await Promise.all([
+        invalidate(),
+        withRevisions
+          ? queryClient.invalidateQueries({
+              queryKey: orpc.posts.admin.revisions.key(),
+            })
+          : null,
+      ]);
+      toast.success(
+        withRevisions
+          ? m.media_deleted_with_revisions({ count: deletedRevisionCount })
+          : m.media_deleted(),
+      );
     },
-    onSettled: () => {
-      setDeleteTarget(null);
+    onError: (error) => {
+      toast.error(
+        error instanceof MediaInUseError
+          ? error.message
+          : m.media_toast_delete_fail(),
+      );
     },
   });
 
-  // Update name mutation
-  const updateAsset = useMutation({
-    mutationFn: (payload: Parameters<typeof updateMediaNameFn>[0]) =>
-      updateMediaNameFn(payload),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: MEDIA_KEYS.all });
-      toast.success(m.media_toast_metadata_updated(), {
-        description: m.media_toast_metadata_updated_desc(),
-      });
+  const deleteUnusedMutation = useMutation({
+    mutationFn: () => orpcClient.media.removeUnused(),
+    onSuccess: async () => {
+      await invalidate();
+      toast.success(m.media_deleted());
     },
   });
 
-  // Load more handler - memoized to prevent IntersectionObserver recreation
+  const replaceMutation = useMutation({
+    mutationFn: (payload: { key: string; image: File }) =>
+      orpcClient.media.replace(payload),
+    onSuccess: async () => {
+      await invalidate();
+      toast.success(m.media_replace_success());
+    },
+    onError: (error) => {
+      const typeChanged =
+        error instanceof ORPCError &&
+        error.code === "MEDIA_INVALID" &&
+        (error.data as { detail?: string } | undefined)?.detail ===
+          "TYPE_CHANGED";
+      toast.error(
+        typeChanged ? m.media_replace_type_changed() : m.media_replace_fail(),
+      );
+    },
+  });
+
   const loadMore = useCallback(() => {
     if (!isFetchingNextPage && hasNextPage) {
-      fetchNextPage();
+      void fetchNextPage();
     }
   }, [isFetchingNextPage, hasNextPage, fetchNextPage]);
 
-  // Selection handlers
-  const toggleSelection = (key: string) => {
-    setSelectedKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
-      return next;
-    });
-  };
-
-  const selectAll = () => {
-    if (selectedKeys.size === mediaItems.length) {
-      setSelectedKeys(new Set());
-    } else {
-      setSelectedKeys(new Set(mediaItems.map((item) => item.key)));
-    }
-  };
-
-  // Request delete - use cached linkedMediaIds for instant validation
-  const requestDelete = (keys: Array<string>) => {
-    // 使用已缓存的 linkedMediaIds 直接判断，无需额外 API 请求
-    const blockedKeys = keys.filter((key) => linkedMediaIds.has(key));
-    const allowedKeys = keys.filter((key) => !linkedMediaIds.has(key));
-
-    // 如果选中了任何受保护资源，只显示 toast 警告，不弹出确认框
-    if (blockedKeys.length > 0) {
-      toast.warning(m.media_toast_protected_delete(), {
-        description: m.media_toast_protected_delete_desc({
-          count: blockedKeys.length,
-        }),
-      });
-      return [];
-    }
-
-    // 只有当所有选中项都是未引用时才弹出确认框
-    if (allowedKeys.length > 0) {
-      setDeleteTarget(allowedKeys);
-    }
-
-    return allowedKeys;
-  };
-
-  // Confirm delete
-  const confirmDelete = (keys?: Array<string>) => {
-    const target = keys ?? deleteTarget;
-    if (!target || target.length === 0) return;
-    deleteMutation.mutate(target);
-  };
-
-  // Cancel delete
-  const cancelDelete = () => {
-    setDeleteTarget(null);
-  };
-
   return {
     mediaItems,
-    totalCount: mediaItems.length,
-    searchQuery: search ?? "", // Ensure compatibility with string type
-    setSearchQuery,
+    view: view ?? "grid",
+    setView: (view: "grid" | "list") =>
+      navigate({ search: (prev) => ({ ...prev, view }), replace: true }),
     unusedOnly: unused ?? false,
     setUnusedOnly,
-    selectedIds: selectedKeys, // 保持接口兼容
-    toggleSelection,
-    selectAll,
-    deleteTarget,
-    isDeleting: deleteMutation.isPending,
-    requestDelete,
-    confirmDelete,
-    cancelDelete,
-    refetch,
+    search: search ?? "",
+    setSearch,
+    sort: sort ?? "newest",
+    setSort,
     loadMore,
+    hasMore: hasNextPage ?? false,
     isLoadingMore: isFetchingNextPage,
-    hasMore: hasNextPage,
     isPending,
-    linkedMediaIds,
-    totalMediaSize,
-    updateAsset,
+    isError,
+    isFetchNextPageError,
+    refetch,
+    stats,
+    deleteKeys: deleteMutation.mutateAsync,
+    deleteUnused: deleteUnusedMutation.mutateAsync,
+    isDeleting: deleteMutation.isPending || deleteUnusedMutation.isPending,
+    replaceFile: replaceMutation.mutateAsync,
+    isReplacing: replaceMutation.isPending,
   };
 }

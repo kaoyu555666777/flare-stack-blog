@@ -1,33 +1,53 @@
-import type { VariantProps } from "class-variance-authority";
-import { cva } from "class-variance-authority";
-import type * as React from "react";
+import { X } from "lucide-react";
+import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
+import "./badge.css";
 
-const badgeVariants = cva(
-  "inline-flex items-center border px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider transition-colors focus:outline-none",
-  {
-    variants: {
-      variant: {
-        default: "border-foreground/20 bg-foreground text-background",
-        secondary: "border-border/40 bg-muted/50 text-muted-foreground",
-        destructive: "border-destructive/30 bg-destructive/10 text-destructive",
-        outline: "border-border/40 text-foreground",
-      },
-    },
-    defaultVariants: {
-      variant: "default",
-    },
-  },
-);
+type BadgeTone = "neutral" | "primary" | "success" | "warning" | "danger";
 
-export interface BadgeProps
-  extends React.HTMLAttributes<HTMLDivElement>,
-    VariantProps<typeof badgeVariants> {}
-
-function Badge({ className, variant, ...props }: BadgeProps) {
+/**
+ * A short status or tag label. With `onRemove` it is a chip: a button after
+ * the label, named by `removeLabel`, takes it away.
+ */
+export function Badge({
+  tone = "neutral",
+  size = "md",
+  className,
+  children,
+  onRemove,
+  removeLabel,
+  ...props
+}: ComponentProps<"span"> & {
+  tone?: BadgeTone;
+  size?: "sm" | "md";
+} & (
+    | { onRemove?: undefined; removeLabel?: undefined }
+    | { onRemove: () => void; removeLabel: string }
+  )) {
   return (
-    <div className={cn(badgeVariants({ variant }), className)} {...props} />
+    <span
+      {...props}
+      className={cn("fuwari-badge", className)}
+      data-tone={tone}
+      data-size={size}
+      data-removable={onRemove ? "" : undefined}
+    >
+      {onRemove ? (
+        <>
+          <span className="fuwari-badge-label">{children}</span>
+          <button
+            type="button"
+            className="fuwari-badge-remove"
+            aria-label={removeLabel}
+            title={removeLabel}
+            onClick={onRemove}
+          >
+            <X size={12} aria-hidden="true" />
+          </button>
+        </>
+      ) : (
+        children
+      )}
+    </span>
   );
 }
-
-export { Badge, badgeVariants };

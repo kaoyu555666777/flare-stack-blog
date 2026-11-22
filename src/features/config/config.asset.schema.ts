@@ -1,8 +1,8 @@
-import type { ThemeName } from "@/features/theme/registry";
-import { themeNames } from "@/features/theme/registry";
-import type { Messages } from "@/lib/i18n";
+import { m } from "@/paraglide/messages";
 
-export const SITE_ASSET_MAX_FILE_SIZE = 8 * 1024 * 1024; // 2MB
+export const SITE_ASSET_MAX_FILE_SIZE_MB = 8;
+export const SITE_ASSET_MAX_FILE_SIZE =
+  SITE_ASSET_MAX_FILE_SIZE_MB * 1024 * 1024;
 
 export const SITE_ASSET_ACCEPTED_TYPES = [
   "image/jpeg",
@@ -15,14 +15,13 @@ export const SITE_ASSET_ACCEPTED_TYPES = [
   "image/vnd.microsoft.icon",
 ] as const;
 
-type ThemePrefix = `themes/${ThemeName}/`;
-const themePrefixes = themeNames.map(
-  (name) => `themes/${name}/` satisfies ThemePrefix,
-);
 const ALLOWED_ASSET_PREFIXES = [
   "favicon/",
   "social/",
-  ...themePrefixes,
+  // Banner image and avatar, shared by every Theme.
+  "site/",
+  // Where they were uploaded before; saved addresses still point here.
+  "themes/fuwari/",
 ] as const;
 
 function isAllowedAssetPath(path: string): boolean {
@@ -30,27 +29,31 @@ function isAllowedAssetPath(path: string): boolean {
   return ALLOWED_ASSET_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 }
 
-export function parseSiteAssetUploadInput(
-  formData: FormData,
-  messages: Messages,
-): { file: File; assetPath: string } {
+export function parseSiteAssetUploadInput(formData: FormData): {
+  file: File;
+  assetPath: string;
+} {
   const file = formData.get("file");
   if (!(file instanceof File)) {
-    throw new Error(messages.settings_asset_validation_file_required());
+    throw new Error(m.settings_asset_validation_file_required());
   }
 
   const assetPath = formData.get("assetPath");
   if (typeof assetPath !== "string" || !assetPath.trim()) {
-    throw new Error(messages.settings_asset_validation_path_required());
+    throw new Error(m.settings_asset_validation_path_required());
   }
 
   const trimmedPath = assetPath.trim().replace(/^\/+/, "").replace(/\\/g, "/");
   if (!isAllowedAssetPath(trimmedPath)) {
-    throw new Error(messages.settings_asset_validation_path_invalid());
+    throw new Error(m.settings_asset_validation_path_invalid());
   }
 
   if (file.size > SITE_ASSET_MAX_FILE_SIZE) {
-    throw new Error(messages.settings_asset_validation_file_too_large());
+    throw new Error(
+      m.settings_asset_validation_file_too_large({
+        maxSizeMb: SITE_ASSET_MAX_FILE_SIZE_MB,
+      }),
+    );
   }
 
   const mime = file.type.toLowerCase();
@@ -67,7 +70,7 @@ export function parseSiteAssetUploadInput(
   ]);
 
   if (!allowedMimes.has(mime) && !allowedExts.has(ext ?? "")) {
-    throw new Error(messages.settings_asset_validation_file_invalid_type());
+    throw new Error(m.settings_asset_validation_file_invalid_type());
   }
 
   return { file, assetPath: trimmedPath };

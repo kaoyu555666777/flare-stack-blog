@@ -1,62 +1,81 @@
 import { standardSchemaResolver } from "@hookform/resolvers/standard-schema";
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { z } from "zod";
-import { authClient } from "@/lib/auth/auth.client";
+import { refreshSession } from "@/features/auth/queries";
+import { createPublicNameSchema } from "@/features/auth/utils/public-name";
+import { getAuthClient } from "@/lib/auth/auth-client";
 import { getProfileAuthErrorMessage } from "@/lib/auth/auth-errors";
-import type { Messages } from "@/lib/i18n";
 import { m } from "@/paraglide/messages";
 
-const createProfileSchema = (messages: Messages) =>
+const createProfileSchema = () =>
   z.object({
-    name: z
-      .string()
-      .min(2, messages.profile_validation_name_min())
-      .max(20, messages.profile_validation_name_max()),
+    name: createPublicNameSchema(),
     image: z
       .union([
         z.literal(""),
-        z.string().url(messages.profile_validation_avatar_invalid()).trim(),
+        z.string().url(m.profile_validation_avatar_invalid()).trim(),
       ])
       .optional(),
   });
 
 type ProfileSchema = z.infer<ReturnType<typeof createProfileSchema>>;
 
-export interface UseProfileFormOptions {
+interface UseProfileFormOptions {
   user: { name: string; image?: string | null } | undefined;
 }
 
 export function useProfileForm(options: UseProfileFormOptions) {
   const { user } = options;
+  const queryClient = useQueryClient();
 
+  const [feedback, setFeedback] = useState<{
+    error: boolean;
+    message: string;
+  } | null>(null);
+  const form = useForm<ProfileSchema>({
+    resolver: standardSchemaResolver(createProfileSchema()),
+    defaultValues: { name: user?.name || "", image: user?.image || "" },
+  });
   const {
     register,
     handleSubmit,
-    formState: { errors, isSubmitting },
-  } = useForm<ProfileSchema>({
-    resolver: standardSchemaResolver(createProfileSchema(m)),
-    values: {
-      name: user?.name || "",
-      image: user?.image || "",
-    },
-  });
+    reset,
+    setValue,
+    watch,
+    formState: { errors, isSubmitting, isDirty },
+  } = form;
+  useEffect(() => {
+    if (!isDirty && !isSubmitting)
+      reset({ name: user?.name || "", image: user?.image || "" });
+    // Session refreshes must not overwrite a draft; only react to incoming profile changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.name, user?.image, reset]);
 
   const onSubmit = async (data: ProfileSchema) => {
-    const { error } = await authClient.updateUser({
-      name: data.name,
-      image: data.image,
-    });
-    if (error) {
-      toast.error(m.profile_toast_update_failed(), {
-        description:
-          getProfileAuthErrorMessage(error, m) ?? m.auth_error_default_desc(),
+    setFeedback(null);
+    try {
+      const { error } = await getAuthClient().updateUser({
+        name: data.name,
+        image: data.image || "",
       });
-      return;
+      if (error) {
+        setFeedback({
+          error: true,
+          message:
+            getProfileAuthErrorMessage(error) ?? m.auth_error_default_desc(),
+        });
+        return;
+      }
+      reset(data);
+      void refreshSession(queryClient);
+      setFeedback({ error: false, message: m.profile_toast_profile_updated() });
+      toast.success(m.profile_toast_profile_updated());
+    } catch {
+      setFeedback({ error: true, message: m.profile_toast_update_failed() });
     }
-    toast.success(m.profile_toast_profile_updated(), {
-      description: m.profile_toast_name_changed({ name: data.name }),
-    });
   };
 
   return {
@@ -64,7 +83,10 @@ export function useProfileForm(options: UseProfileFormOptions) {
     errors,
     handleSubmit: handleSubmit(onSubmit),
     isSubmitting,
+    isDirty,
+    image: watch("image") || "",
+    setImage: (image: string) =>
+      setValue("image", image, { shouldDirty: true, shouldValidate: true }),
+    feedback,
   };
 }
-
-export type UseProfileFormReturn = ReturnType<typeof useProfileForm>;

@@ -6,12 +6,28 @@ Repo-local configuration for engineering skills.
 
 ### Issue tracker
 
-Issues and PRDs are tracked as local markdown files under `.scratch/`. See `docs/agents/issue-tracker.md`.
+Issues and PRDs are tracked in GitHub Issues on `du2333/flare-stack-blog`, with tickets as sub-issues of their spec. See `docs/agents/issue-tracker.md`. Dispatching a ticket to a subagent, reviewing it and accepting it: `docs/agents/subagent-brief.md`.
 
 ### Triage labels
 
-This repo uses the default five-state triage vocabulary. See `docs/agents/triage-labels.md`.
+This repo uses the default five-state triage vocabulary as GitHub labels. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
 This repo uses a single-context domain doc layout. See `docs/agents/domain.md`.
+
+### Skills
+
+Skills live in `.agents/skills/<name>`. `flare-stack-blog` is the one published to users; the others are this repository's own and each has a link at `.claude/skills/<name>` (`ln -s ../../.agents/skills/<name>`), which a test holds.
+
+## Review
+
+A diff is reviewed against `CODING_STANDARDS.md`; `bun run check` is what CI runs short of the build and the tests.
+
+## Versions and releases
+
+Designing a change that deletes or rewrites site data, adds a migration, or needs new configuration: decide its release level first, by `docs/version-contract.md`. Cutting a release, only when the user asks: `docs/agents/release.md`.
+
+## Cloudflare
+
+Cloudflare operations go through the `cf` CLI (`bunx cf`), a 2026 beta that replaced Wrangler here. Find commands with `bunx cf cli search "<task>"`. Deploying a branch to the rehearsal Worker, and pointing its update check at a branch's `upgrades.json`: `docs/agents/rehearsal.md`.

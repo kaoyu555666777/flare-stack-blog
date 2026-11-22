@@ -1,0 +1,237 @@
+/*
+ * 「设置」 · 站点: groups of settings (AdminFormSection), one AdminFormRow per
+ * setting; the links, the navigation and the icons stack their parts in the
+ * row's control column, which stops at --admin-form-control-max.
+ */
+.site-studio {
+  display: flex;
+  flex-direction: column;
+  /* A navigation row's first column (the drag handle) and its column gap:
+     the child rows are indented by the two together, so their handle starts
+     where the parent's name field does. */
+  --site-nav-handle: 24px;
+  --site-nav-gap: 8px;
+}
+.site-char-count {
+  margin-top: 6px;
+  color: var(--fuwari-fg-50);
+  font-size: var(--admin-text-meta);
+  line-height: var(--admin-leading-meta);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+/* The title and the description as a search engine lists them. */
+.site-search-preview {
+  padding: 14px 16px 16px;
+  border-radius: 12px;
+  background: var(--admin-sunken);
+  box-shadow: inset 0 0 0 1px var(--admin-line);
+}
+.site-search-preview-site {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.site-search-preview-site > span {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--admin-surface);
+  box-shadow: 0 0 0 1px var(--admin-line);
+}
+.site-search-preview-site img {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+.site-search-preview-site > p {
+  display: grid;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 16px;
+}
+.site-search-preview-site :is(b, i) {
+  overflow: hidden;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.site-search-preview-site b {
+  font-weight: 500;
+  color: var(--admin-fg);
+}
+.site-search-preview-site i {
+  color: var(--admin-fg-3);
+}
+.site-search-preview-title {
+  margin-top: 8px;
+  overflow: hidden;
+  /* A result's headline, larger than the body; no role has this size. */
+  font-size: 17px;
+  line-height: 24px;
+  color: var(--admin-fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.site-search-preview-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  margin-top: 2px;
+  font-size: var(--admin-text-small);
+  line-height: var(--admin-leading-small);
+  color: var(--admin-fg-2);
+  overflow-wrap: anywhere;
+}
+.site-add-link {
+  margin-top: 8px;
+}
+.site-sort-hint {
+  display: block;
+  margin-top: 4px;
+}
+
+/* The navigation: a handle, the name, the address and remove. */
+.site-nav-fields {
+  display: grid;
+  gap: 10px;
+}
+.site-nav-row {
+  display: grid;
+  grid-template-columns:
+    var(--site-nav-handle) minmax(0, 0.8fr) minmax(0, 1.2fr)
+    36px;
+  align-items: center;
+  gap: var(--site-nav-gap);
+}
+.site-nav-item {
+  position: relative;
+  border-radius: 12px;
+}
+.site-nav-item[data-dragging="true"] {
+  z-index: 2;
+  background: var(--fuwari-card-bg);
+  box-shadow: 0 6px 22px rgb(0 0 0/0.12);
+}
+.site-nav-item[data-drop-target="true"] {
+  outline: 2px solid color-mix(in srgb, var(--fuwari-primary) 45%, transparent);
+  outline-offset: 3px;
+}
+/* A group says it does not navigate where an address would be. */
+.site-nav-group-note {
+  min-width: 0;
+  color: var(--admin-fg-3);
+  font-size: var(--admin-text-meta);
+  line-height: var(--admin-leading-meta);
+}
+/*
+ * Under a link: the add action, in line with the name field (the handle's
+ * column and the gap). With child links it becomes their list, hung from a
+ * hairline under the middle of the parent's handle; the children sort inside
+ * it only. The literals: 10px between rows is the gap of the other row
+ * stacks of this file, 8px above the list is the gap inside a row, 1px is
+ * the hairline.
+ */
+.site-nav-children {
+  display: grid;
+  gap: 10px;
+  margin-left: calc(var(--site-nav-handle) + var(--site-nav-gap));
+}
+.site-nav-children[data-group="true"] {
+  margin-top: 8px;
+  margin-left: calc(var(--site-nav-handle) / 2);
+  padding-left: calc(var(--site-nav-handle) / 2 + var(--site-nav-gap) - 1px);
+  border-left: 1px solid var(--admin-line);
+}
+.site-nav-add-child {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+.site-nav-limit {
+  color: var(--admin-fg-3);
+  font-size: var(--admin-text-meta);
+  line-height: var(--admin-leading-meta);
+}
+/* The social links, as rows of platform, address and remove. */
+.site-social-rows {
+  display: grid;
+  gap: 10px;
+}
+.site-social-item {
+  display: grid;
+  gap: 8px;
+}
+/* A handle, the platform's mark, the platform, the address and remove. */
+.site-social-row {
+  display: grid;
+  grid-template-columns: 24px 32px 124px minmax(0, 1fr) 36px;
+  align-items: center;
+  gap: 8px;
+}
+.site-social-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: var(--admin-hover);
+  color: var(--admin-fg-2);
+}
+.site-social-icon img {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+/* A custom link's name and icon, under its platform and address. */
+.site-social-custom {
+  grid-template-columns: minmax(0, 1fr) auto;
+  justify-content: start;
+  padding-left: 72px;
+}
+
+/* Where the presentation settings went: a hint at the foot of the page. */
+.site-moved-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  max-width: 960px;
+  padding-top: 20px;
+  border-top: 1px solid var(--admin-rule);
+  color: var(--fuwari-fg-50);
+  font-size: var(--admin-text-meta);
+  line-height: var(--admin-leading-meta);
+}
+@media (max-width: 450px) {
+  /* Platform and address stack, the remove button beside the platform. */
+  .site-social-row:not(.site-social-custom) {
+    grid-template-columns: 24px 32px minmax(0, 1fr) 36px;
+  }
+  .site-social-row:not(.site-social-custom) > :nth-child(4) {
+    grid-column: 2 / -1;
+    grid-row: 2;
+  }
+  .site-social-custom {
+    padding-left: 0;
+  }
+  .site-nav-row {
+    grid-template-columns: var(--site-nav-handle) minmax(0, 1fr) 36px;
+  }
+  .site-nav-row > :nth-child(3) {
+    grid-column: 2 / 3;
+    grid-row: 2;
+  }
+  .site-nav-row > :nth-child(4) {
+    grid-column: 3;
+    grid-row: 1 / 3;
+  }
+}

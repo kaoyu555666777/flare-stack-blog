@@ -1,99 +1,141 @@
-import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
-import type { CommentStatus } from "@/lib/db/schema";
-import { getAllCommentsFn } from "../api/comments.admin.api";
-import {
-  getMyCommentsFn,
-  getRepliesByRootIdFn,
-  getRootCommentsByPostIdFn,
-} from "../api/comments.public.api";
+import { ORPCError } from "@orpc/client";
+import { orpc } from "@/lib/orpc";
+import type { CommentTarget } from "../comment-target";
+import { COMMENT_PAGE_SIZE } from "../comment-thread";
 
-export const COMMENTS_KEYS = {
-  all: ["comments"] as const,
-
-  // Parent keys (static arrays for prefix invalidation)
-  mine: ["comments", "mine"] as const,
-  admin: ["comments", "admin"] as const,
-
-  // Child keys (functions for specific queries)
-  roots: (postId: number) => ["comments", "roots", postId] as const,
-  replies: (postId: number, rootId: number) =>
-    ["comments", "replies", postId, rootId] as const,
-  repliesLists: (postId: number) => ["comments", "replies", postId] as const,
-  userStats: (userId: string) =>
-    ["comments", "admin", "user-stats", userId] as const,
-};
-
-export function rootCommentsByPostIdQuery(postId: number, userId?: string) {
-  return queryOptions({
-    queryKey: [...COMMENTS_KEYS.roots(postId), { userId }],
-    queryFn: () => getRootCommentsByPostIdFn({ data: { postId } }),
-  });
+function rootsNextPage(
+  lastPage: { items: Array<unknown> },
+  _allPages: unknown,
+  lastPageParam: number,
+) {
+  if (lastPage.items.length < COMMENT_PAGE_SIZE) {
+    return undefined;
+  }
+  return lastPageParam + lastPage.items.length;
 }
 
-export function rootCommentsByPostIdInfiniteQuery(
-  postId: number,
-  userId?: string,
+function repliesNextPage(
+  lastPage: { items: Array<unknown> },
+  allPages: Array<{ items: Array<unknown> }>,
 ) {
-  return infiniteQueryOptions({
-    queryKey: [...COMMENTS_KEYS.roots(postId), "infinite", { userId }],
-    queryFn: ({ pageParam = 0 }) =>
-      getRootCommentsByPostIdFn({
-        data: { postId, offset: pageParam, limit: 20 },
+  if (lastPage.items.length < COMMENT_PAGE_SIZE) {
+    return undefined;
+  }
+  return allPages.reduce((sum, page) => sum + page.items.length, 0);
+}
+
+/** A Post's Root Comments, or a Moment's: the same pages from either path. */
+export function rootCommentsInfiniteQuery(target: CommentTarget) {
+  const paging = (pageParam: number) => ({
+    offset: pageParam,
+    limit: COMMENT_PAGE_SIZE,
+  });
+  if (target.type === "moment") {
+    return orpc.comments.moment.roots.infiniteOptions({
+      input: (pageParam: number) => ({
+        momentId: target.id,
+        ...paging(pageParam),
       }),
+      initialPageParam: 0,
+      getNextPageParam: rootsNextPage,
+    });
+  }
+  return orpc.comments.roots.infiniteOptions({
+    input: (pageParam: number) => ({
+      postId: target.id,
+      ...paging(pageParam),
+    }),
     initialPageParam: 0,
-    getNextPageParam: (lastPage, allPages) => {
-      const totalLoaded = allPages.reduce(
-        (sum, page) => sum + page.items.length,
-        0,
-      );
-      return totalLoaded < lastPage.total ? totalLoaded : undefined;
-    },
+    getNextPageParam: rootsNextPage,
   });
 }
 
 export function repliesByRootIdInfiniteQuery(
-  postId: number,
+  target: CommentTarget,
   rootId: number,
-  userId?: string,
 ) {
-  return infiniteQueryOptions({
-    queryKey: [...COMMENTS_KEYS.replies(postId, rootId), { userId }],
-    queryFn: ({ pageParam = 0 }) =>
-      getRepliesByRootIdFn({
-        data: { postId, rootId, offset: pageParam, limit: 20 },
+  const paging = (pageParam: number) => ({
+    rootId,
+    offset: pageParam,
+    limit: COMMENT_PAGE_SIZE,
+  });
+  if (target.type === "moment") {
+    return orpc.comments.moment.replies.infiniteOptions({
+      input: (pageParam: number) => ({
+        momentId: target.id,
+        ...paging(pageParam),
       }),
+      initialPageParam: 0,
+      getNextPageParam: repliesNextPage,
+    });
+  }
+  return orpc.comments.replies.infiniteOptions({
+    input: (pageParam: number) => ({
+      postId: target.id,
+      ...paging(pageParam),
+    }),
     initialPageParam: 0,
-    getNextPageParam: (lastPage, allPages) => {
-      const totalLoaded = allPages.reduce(
-        (sum, page) => sum + page.items.length,
-        0,
-      );
-      return totalLoaded < lastPage.total ? totalLoaded : undefined;
-    },
+    getNextPageParam: repliesNextPage,
   });
 }
 
-export function myCommentsQuery(
-  options: { offset?: number; limit?: number; status?: CommentStatus } = {},
-) {
-  return queryOptions({
-    queryKey: [...COMMENTS_KEYS.mine, options],
-    queryFn: () => getMyCommentsFn({ data: options }),
+/** A 4xx answer (a missing comment) is final; only server or network faults are retried. */
+function retryUnlessRefused(failureCount: number, error: unknown) {
+  if (error instanceof ORPCError && error.status < 500) return false;
+  return failureCount < 3;
+}
+
+export function commentThreadQuery(target: CommentTarget, commentId: number) {
+  if (target.type === "moment") {
+    return orpc.comments.moment.thread.queryOptions({
+      input: { momentId: target.id, id: commentId },
+      retry: retryUnlessRefused,
+    });
+  }
+  return orpc.comments.thread.queryOptions({
+    input: { postId: target.id, id: commentId },
+    retry: retryUnlessRefused,
   });
 }
 
-export function allCommentsQuery(
-  options: {
-    offset?: number;
-    limit?: number;
-    status?: CommentStatus;
-    postId?: number;
-    userId?: string;
-    userName?: string;
-  } = {},
-) {
-  return queryOptions({
-    queryKey: [...COMMENTS_KEYS.admin, options],
-    queryFn: () => getAllCommentsFn({ data: options }),
+/** How many replies the Admin's conversation view reads of one thread. */
+export const ADMIN_THREAD_REPLY_LIMIT = 100;
+
+/**
+ * A thread's replies in one read, oldest first, for the Admin's conversation
+ * view; a longer thread is cut at ADMIN_THREAD_REPLY_LIMIT.
+ */
+export function threadRepliesQuery(target: CommentTarget, rootId: number) {
+  const page = { rootId, offset: 0, limit: ADMIN_THREAD_REPLY_LIMIT };
+  if (target.type === "moment") {
+    return orpc.comments.moment.replies.queryOptions({
+      input: { momentId: target.id, ...page },
+      retry: retryUnlessRefused,
+    });
+  }
+  return orpc.comments.replies.queryOptions({
+    input: { postId: target.id, ...page },
+    retry: retryUnlessRefused,
   });
+}
+
+/**
+ * Every cached read of one target's Comments (roots, replies, threads), for
+ * the mutations that change them.
+ */
+export function commentViewKeys(target: CommentTarget) {
+  if (target.type === "moment") {
+    const input = { momentId: target.id };
+    return [
+      orpc.comments.moment.roots.key({ input }),
+      orpc.comments.moment.replies.key({ input }),
+      orpc.comments.moment.thread.key({ input }),
+    ];
+  }
+  const input = { postId: target.id };
+  return [
+    orpc.comments.roots.key({ input }),
+    orpc.comments.replies.key({ input }),
+    orpc.comments.thread.key({ input }),
+  ];
 }
